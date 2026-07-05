@@ -1,0 +1,10 @@
+{
+  "GameName": "CounterStrike",
+  "Version": "Source",
+  "AppID": "232330",
+  "Engine": "Source",
+  "Executable": "srcds.exe",
+  "DefaultPort": 27015,
+  "SupportsWorkshop": false,
+  "SupportsRCON": true
+}

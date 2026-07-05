@@ -1,0 +1,10 @@
+{
+  "GameName": "Left4Dead",
+  "Version": "1",
+  "AppID": "222840",
+  "Engine": "Source",
+  "Executable": "srcds.exe",
+  "DefaultPort": 27015,
+  "SupportsWorkshop": false,
+  "SupportsRCON": true
+}

@@ -1,0 +1,10 @@
+{
+  "GameName": "TeamFortress",
+  "Version": "2",
+  "AppID": "232250",
+  "Engine": "Source",
+  "Executable": "srcds.exe",
+  "DefaultPort": 27015,
+  "SupportsWorkshop": true,
+  "SupportsRCON": true
+}

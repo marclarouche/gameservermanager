@@ -1,0 +1,69 @@
+BeforeAll {
+    Import-Module "$PSScriptRoot/../Core/Config.psm1" -Force
+    $script:TestDir = Join-Path $TestDrive 'config-tests'
+    New-Item -ItemType Directory -Path $script:TestDir -Force | Out-Null
+}
+
+Describe 'Core/Config.psm1' {
+
+    It 'loads a valid config file' {
+        $path = Join-Path $script:TestDir 'valid.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","DefaultPort":27015}'
+        $cfg = Get-GSMConfig -Path $path
+        $cfg.GameName | Should -Be 'Insurgency'
+    }
+
+    It 'rejects malformed JSON' {
+        $path = Join-Path $script:TestDir 'malformed.json'
+        Set-Content -Path $path -Value '{"GameName": "Insurgency", "AppID":'
+        { Get-GSMConfig -Path $path } | Should -Throw
+    }
+
+    It 'rejects a missing required field' {
+        $path = Join-Path $script:TestDir 'missing.json'
+        Set-Content -Path $path -Value '{"AppID":"237410"}'
+        { Get-GSMConfig -Path $path } | Should -Throw
+    }
+
+    It 'rejects an out-of-range port' {
+        $path = Join-Path $script:TestDir 'badport.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","DefaultPort":99999}'
+        { Get-GSMConfig -Path $path } | Should -Throw
+    }
+
+    It 'rejects duplicate top-level keys' {
+        $path = Join-Path $script:TestDir 'dupe.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","GameName":"Duplicate","AppID":"237410"}'
+        { Get-GSMConfig -Path $path } | Should -Throw
+    }
+
+    It 'rejects unsafe LaunchOptions characters' {
+        $path = Join-Path $script:TestDir 'unsafe.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","LaunchOptions":"+exec cfg.cfg; rm -rf /"}'
+        { Get-GSMConfig -Path $path } | Should -Throw
+    }
+
+    It 'missing file throws with the path in the message' {
+        $path = Join-Path $script:TestDir 'does-not-exist.json'
+        { Get-GSMConfig -Path $path } | Should -Throw -ExpectedMessage '*does-not-exist.json*'
+    }
+
+    It 'writes a valid config and reads it back' {
+        $path = Join-Path $script:TestDir 'roundtrip.json'
+        $cfg = [PSCustomObject]@{ GameName = 'Insurgency'; AppID = '237410'; DefaultPort = 27015 }
+        Set-GSMConfig -Path $path -Config $cfg
+        (Get-GSMConfig -Path $path).AppID | Should -Be '237410'
+    }
+
+    It 'rejects writing an invalid config' {
+        $path = Join-Path $script:TestDir 'invalid-write.json'
+        $cfg = [PSCustomObject]@{ GameName = 'Insurgency'; AppID = '237410'; DefaultPort = 0 }
+        { Set-GSMConfig -Path $path -Config $cfg } | Should -Throw
+    }
+
+    It 'loads a valid config that omits the optional DefaultPort field entirely' {
+        $path = Join-Path $script:TestDir 'no-port.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410"}'
+        { Get-GSMConfig -Path $path } | Should -Not -Throw
+    }
+}

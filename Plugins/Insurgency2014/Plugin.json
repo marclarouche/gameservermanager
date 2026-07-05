@@ -1,0 +1,10 @@
+{
+  "GameName": "Insurgency",
+  "Version": "2014",
+  "AppID": "237410",
+  "Engine": "Source",
+  "Executable": "srcds.exe",
+  "DefaultPort": 27015,
+  "SupportsWorkshop": true,
+  "SupportsRCON": true
+}
