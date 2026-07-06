@@ -1,0 +1,9 @@
+{
+  "GameName": "TeamFortress",
+  "AppID": "232250",
+  "DefaultPort": 27015,
+  "Map": "cp_dustbowl",
+  "MaxPlayers": 24,
+  "RCONPassword": "",
+  "WorkshopItems": []
+}
