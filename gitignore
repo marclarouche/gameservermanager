@@ -1,0 +1,11 @@
+Config/*
+!Config/.gitkeep
+!Config/SteamCMD.json
+Logs/*
+!Logs/.gitkeep
+Reports/*
+!Reports/.gitkeep
+Backups/*
+!Backups/.gitkeep
+SteamCMD/*
+!SteamCMD/.gitkeep
