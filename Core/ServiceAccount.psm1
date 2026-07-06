@@ -159,7 +159,10 @@ function Grant-GSMServiceLogonRight {
         $cfgPath = Join-Path -Path $workDirectory -ChildPath 'secedit-export.inf'
         $dbPath = Join-Path -Path $workDirectory -ChildPath 'secedit.sdb'
 
-        & secedit.exe /export /cfg $cfgPath /areas USER_RIGHTS | Out-Null
+        $exportProcess = Start-Process -FilePath 'secedit.exe' -ArgumentList @('/export', '/cfg', $cfgPath, '/areas', 'USER_RIGHTS') -Wait -NoNewWindow -PassThru -ErrorAction Stop
+        if ($exportProcess.ExitCode -ne 0) {
+            throw "secedit.exe /export exited with code $($exportProcess.ExitCode) while exporting user rights."
+        }
 
         $lines = Get-Content -Path $cfgPath
         $updatedLines = [System.Collections.Generic.List[string]]::new()
@@ -192,7 +195,10 @@ function Grant-GSMServiceLogonRight {
 
         Set-Content -Path $cfgPath -Value $updatedLines
 
-        & secedit.exe /configure /db $dbPath /cfg $cfgPath /areas USER_RIGHTS | Out-Null
+        $configureProcess = Start-Process -FilePath 'secedit.exe' -ArgumentList @('/configure', '/db', $dbPath, '/cfg', $cfgPath, '/areas', 'USER_RIGHTS') -Wait -NoNewWindow -PassThru -ErrorAction Stop
+        if ($configureProcess.ExitCode -ne 0) {
+            throw "secedit.exe /configure exited with code $($configureProcess.ExitCode) while granting SeServiceLogonRight."
+        }
     }
     finally {
         Remove-Item -Path $workDirectory -Recurse -Force -ErrorAction SilentlyContinue

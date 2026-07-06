@@ -1,0 +1,10 @@
+{
+  "GameName": "Insurgency",
+  "AppID": "237410",
+  "DefaultPort": 27015,
+  "Map": "Market",
+  "Mode": "Checkpoint",
+  "MaxPlayers": 32,
+  "RCONPassword": "",
+  "WorkshopItems": []
+}
