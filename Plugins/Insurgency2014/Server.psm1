@@ -10,21 +10,26 @@
     stop, or monitor any process.
 .NOTES
     Functions implemented: Get-Insurgency2014LaunchArgs,
-    Test-Insurgency2014ServerConfig.
+    Test-Insurgency2014ServerConfig, Start-Insurgency2014Server,
+    Stop-Insurgency2014Server, Restart-Insurgency2014Server,
+    Get-Insurgency2014ServerStatus, New-Insurgency2014Config.
 
-    New-Insurgency2014Config (the interactive "Configure" action) is
-    intentionally out of scope for this pass: PRD section 8 lists the
-    interactive config editor as item 12, after start/stop/status (item
-    11), and today's task scoped Server.psm1 to launch-arg construction and
-    validation only. Invoke-GSMAction already handles a plugin not
-    implementing an action (logs an error, returns $false), so leaving
-    Configure unimplemented for now doesn't break anything.
+    Start/Stop/Restart/Status (PRD section 8 item 11) and Configure (item
+    12) are now implemented as thin wrappers around Core/ProcessManager.psm1
+    and Core/ConfigEditor.psm1 respectively: this module only supplies its
+    own identity (FolderName, Executable, AppID, DefaultPort) and the names
+    of its own Get-Insurgency2014LaunchArgs / Get-Insurgency2014Maps /
+    Get-Insurgency2014Modes / Test-Insurgency2014ServerConfig functions; the
+    actual Scheduled Task lifecycle and interactive prompting/backup/write
+    logic lives entirely in those two Core modules.
 #>
 
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Maps.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Modes.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ProcessManager.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ConfigEditor.psm1') -Force
 
 # Maps each confirmed display-name mode to the internal suffix srcds.exe
 # expects after the map name in +map <mapname>_<suffix>. Almost all modes
@@ -240,4 +245,98 @@ function Get-Insurgency2014LaunchArgs {
     return $arguments.ToArray()
 }
 
-Export-ModuleMember -Function Get-Insurgency2014LaunchArgs, Test-Insurgency2014ServerConfig
+function Start-Insurgency2014Server {
+    <#
+    .SYNOPSIS
+        Starts the Insurgency2014 server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Start-GSMServer with this plugin's
+        FolderName, Executable, and launch-argument function name. See
+        Core/ProcessManager.psm1 for the actual Scheduled Task lifecycle.
+    .EXAMPLE
+        Start-Insurgency2014Server
+    .NOTES
+        Throws under the same conditions as Start-GSMServer: missing
+        config, missing executable, or Scheduled Task registration/start
+        failure.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Start-GSMServer -FolderName 'Insurgency2014' -Executable 'srcds.exe' -GetLaunchArgsFunctionName 'Get-Insurgency2014LaunchArgs'
+}
+
+function Stop-Insurgency2014Server {
+    <#
+    .SYNOPSIS
+        Stops the Insurgency2014 server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Stop-GSMServer with this plugin's
+        FolderName.
+    .EXAMPLE
+        Stop-Insurgency2014Server
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Stop-GSMServer -FolderName 'Insurgency2014'
+}
+
+function Restart-Insurgency2014Server {
+    <#
+    .SYNOPSIS
+        Restarts the Insurgency2014 server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Restart-GSMServer with this plugin's
+        FolderName, Executable, and launch-argument function name.
+    .EXAMPLE
+        Restart-Insurgency2014Server
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Restart-GSMServer -FolderName 'Insurgency2014' -Executable 'srcds.exe' -GetLaunchArgsFunctionName 'Get-Insurgency2014LaunchArgs'
+}
+
+function Get-Insurgency2014ServerStatus {
+    <#
+    .SYNOPSIS
+        Reports the Insurgency2014 server's running status.
+    .DESCRIPTION
+        Thin wrapper: delegates to Get-GSMServerStatus with this plugin's
+        FolderName. Returns 'Running', 'Stopped', or 'Crashed'.
+    .EXAMPLE
+        Get-Insurgency2014ServerStatus
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    return Get-GSMServerStatus -FolderName 'Insurgency2014'
+}
+
+function New-Insurgency2014Config {
+    <#
+    .SYNOPSIS
+        Interactively creates or updates Insurgency2014's server config.
+    .DESCRIPTION
+        Thin wrapper: delegates to New-GSMServerConfig with this plugin's
+        FolderName, GameName, AppID, DefaultPort, Maps/ServerConfig/Modes
+        function names, -RequiresMode, and -SupportsWorkshop (Insurgency
+        2014 has both selectable game modes and Workshop support).
+    .EXAMPLE
+        New-Insurgency2014Config
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return New-GSMServerConfig -FolderName 'Insurgency2014' -GameName 'Insurgency' -AppID '237410' -DefaultPort 27015 `
+        -GetMapsFunctionName 'Get-Insurgency2014Maps' -TestServerConfigFunctionName 'Test-Insurgency2014ServerConfig' `
+        -RequiresMode -GetModesFunctionName 'Get-Insurgency2014Modes' -SupportsWorkshop
+}
+
+Export-ModuleMember -Function Get-Insurgency2014LaunchArgs, Test-Insurgency2014ServerConfig, Start-Insurgency2014Server, Stop-Insurgency2014Server, Restart-Insurgency2014Server, Get-Insurgency2014ServerStatus, New-Insurgency2014Config

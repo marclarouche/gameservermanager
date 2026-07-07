@@ -201,3 +201,56 @@ Describe 'Plugins/Insurgency2014/Server.psm1' {
         }
     }
 }
+
+Describe 'Plugins/Insurgency2014/Server.psm1 - lifecycle wrappers' {
+    BeforeEach {
+        Mock -ModuleName Server -CommandName Start-GSMServer -MockWith { $true }
+        Mock -ModuleName Server -CommandName Stop-GSMServer -MockWith { $true }
+        Mock -ModuleName Server -CommandName Restart-GSMServer -MockWith { $true }
+        Mock -ModuleName Server -CommandName Get-GSMServerStatus -MockWith { 'Running' }
+        Mock -ModuleName Server -CommandName New-GSMServerConfig -MockWith { $true }
+    }
+
+    It 'Start-Insurgency2014Server delegates to Start-GSMServer with this plugin''s FolderName, Executable, and launch-args function name' {
+        $result = Start-Insurgency2014Server
+
+        $result | Should -Be $true
+        Should -Invoke -ModuleName Server -CommandName Start-GSMServer -Times 1 -ParameterFilter {
+            $FolderName -eq 'Insurgency2014' -and $Executable -eq 'srcds.exe' -and $GetLaunchArgsFunctionName -eq 'Get-Insurgency2014LaunchArgs'
+        }
+    }
+
+    It 'Stop-Insurgency2014Server delegates to Stop-GSMServer with this plugin''s FolderName' {
+        $result = Stop-Insurgency2014Server
+
+        $result | Should -Be $true
+        Should -Invoke -ModuleName Server -CommandName Stop-GSMServer -Times 1 -ParameterFilter { $FolderName -eq 'Insurgency2014' }
+    }
+
+    It 'Restart-Insurgency2014Server delegates to Restart-GSMServer with this plugin''s FolderName, Executable, and launch-args function name' {
+        $result = Restart-Insurgency2014Server
+
+        $result | Should -Be $true
+        Should -Invoke -ModuleName Server -CommandName Restart-GSMServer -Times 1 -ParameterFilter {
+            $FolderName -eq 'Insurgency2014' -and $Executable -eq 'srcds.exe' -and $GetLaunchArgsFunctionName -eq 'Get-Insurgency2014LaunchArgs'
+        }
+    }
+
+    It 'Get-Insurgency2014ServerStatus delegates to Get-GSMServerStatus with this plugin''s FolderName' {
+        $result = Get-Insurgency2014ServerStatus
+
+        $result | Should -Be 'Running'
+        Should -Invoke -ModuleName Server -CommandName Get-GSMServerStatus -Times 1 -ParameterFilter { $FolderName -eq 'Insurgency2014' }
+    }
+
+    It 'New-Insurgency2014Config delegates to New-GSMServerConfig with this plugin''s config metadata' {
+        $result = New-Insurgency2014Config
+
+        $result | Should -Be $true
+        Should -Invoke -ModuleName Server -CommandName New-GSMServerConfig -Times 1 -ParameterFilter {
+            $FolderName -eq 'Insurgency2014' -and $GameName -eq 'Insurgency' -and $AppID -eq '237410' -and $DefaultPort -eq 27015 -and
+            $GetMapsFunctionName -eq 'Get-Insurgency2014Maps' -and $TestServerConfigFunctionName -eq 'Test-Insurgency2014ServerConfig' -and
+            $RequiresMode -eq $true -and $GetModesFunctionName -eq 'Get-Insurgency2014Modes' -and $SupportsWorkshop -eq $true
+        }
+    }
+}
