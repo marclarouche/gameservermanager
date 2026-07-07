@@ -224,3 +224,56 @@ Describe 'Plugins/L4D2/Server.psm1' {
         }
     }
 }
+
+Describe 'Plugins/L4D2/Server.psm1 - lifecycle wrappers' {
+    BeforeEach {
+        Mock -ModuleName Server -CommandName Start-GSMServer -MockWith { $true }
+        Mock -ModuleName Server -CommandName Stop-GSMServer -MockWith { $true }
+        Mock -ModuleName Server -CommandName Restart-GSMServer -MockWith { $true }
+        Mock -ModuleName Server -CommandName Get-GSMServerStatus -MockWith { 'Running' }
+        Mock -ModuleName Server -CommandName New-GSMServerConfig -MockWith { $true }
+    }
+
+    It 'Start-L4D2Server delegates to Start-GSMServer with this plugin''s FolderName, Executable, and launch-args function name' {
+        $result = Start-L4D2Server
+
+        $result | Should -Be $true
+        Should -Invoke -ModuleName Server -CommandName Start-GSMServer -Times 1 -ParameterFilter {
+            $FolderName -eq 'L4D2' -and $Executable -eq 'srcds.exe' -and $GetLaunchArgsFunctionName -eq 'Get-L4D2LaunchArgs'
+        }
+    }
+
+    It 'Stop-L4D2Server delegates to Stop-GSMServer with this plugin''s FolderName' {
+        $result = Stop-L4D2Server
+
+        $result | Should -Be $true
+        Should -Invoke -ModuleName Server -CommandName Stop-GSMServer -Times 1 -ParameterFilter { $FolderName -eq 'L4D2' }
+    }
+
+    It 'Restart-L4D2Server delegates to Restart-GSMServer with this plugin''s FolderName, Executable, and launch-args function name' {
+        $result = Restart-L4D2Server
+
+        $result | Should -Be $true
+        Should -Invoke -ModuleName Server -CommandName Restart-GSMServer -Times 1 -ParameterFilter {
+            $FolderName -eq 'L4D2' -and $Executable -eq 'srcds.exe' -and $GetLaunchArgsFunctionName -eq 'Get-L4D2LaunchArgs'
+        }
+    }
+
+    It 'Get-L4D2ServerStatus delegates to Get-GSMServerStatus with this plugin''s FolderName' {
+        $result = Get-L4D2ServerStatus
+
+        $result | Should -Be 'Running'
+        Should -Invoke -ModuleName Server -CommandName Get-GSMServerStatus -Times 1 -ParameterFilter { $FolderName -eq 'L4D2' }
+    }
+
+    It 'New-L4D2Config delegates to New-GSMServerConfig with this plugin''s config metadata' {
+        $result = New-L4D2Config
+
+        $result | Should -Be $true
+        Should -Invoke -ModuleName Server -CommandName New-GSMServerConfig -Times 1 -ParameterFilter {
+            $FolderName -eq 'L4D2' -and $GameName -eq 'Left4Dead' -and $AppID -eq '222860' -and $DefaultPort -eq 27015 -and
+            $GetMapsFunctionName -eq 'Get-L4D2Maps' -and $TestServerConfigFunctionName -eq 'Test-L4D2ServerConfig' -and
+            $RequiresMode -eq $true -and $GetModesFunctionName -eq 'Get-L4D2Modes' -and $SupportsWorkshop -eq $true
+        }
+    }
+}

@@ -9,10 +9,18 @@
     a config object and validates that config object; it does not start,
     stop, or monitor any process.
 .NOTES
-    Functions implemented: Get-L4D2LaunchArgs, Test-L4D2ServerConfig.
+    Functions implemented: Get-L4D2LaunchArgs, Test-L4D2ServerConfig,
+    Start-L4D2Server, Stop-L4D2Server, Restart-L4D2Server,
+    Get-L4D2ServerStatus, New-L4D2Config.
 
-    New-L4D2Config (the interactive "Configure" action) is intentionally out
-    of scope for this pass, matching every other Phase 1 plugin's Server.psm1.
+    Start/Stop/Restart/Status (PRD section 8 item 11) and Configure (item
+    12) are now implemented as thin wrappers around Core/ProcessManager.psm1
+    and Core/ConfigEditor.psm1 respectively: this module only supplies its
+    own identity (FolderName, Executable, AppID, DefaultPort) and the names
+    of its own Get-L4D2LaunchArgs / Get-L4D2Maps / Get-L4D2Modes /
+    Test-L4D2ServerConfig functions; the actual Scheduled Task lifecycle and
+    interactive prompting/backup/write logic lives entirely in those two
+    Core modules.
 
     *** WORKSHOP SUPPORT ***
     Plugin.json declares "SupportsWorkshop": true for this plugin, unlike
@@ -54,6 +62,8 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Maps.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Modes.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ProcessManager.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ConfigEditor.psm1') -Force
 
 function Get-L4D2ConfigPropertyValue {
     # Internal helper. Not exported: reads a property from a config psobject
@@ -243,4 +253,98 @@ function Get-L4D2LaunchArgs {
     return $arguments.ToArray()
 }
 
-Export-ModuleMember -Function Get-L4D2LaunchArgs, Test-L4D2ServerConfig
+function Start-L4D2Server {
+    <#
+    .SYNOPSIS
+        Starts the L4D2 server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Start-GSMServer with this plugin's
+        FolderName, Executable, and launch-argument function name. See
+        Core/ProcessManager.psm1 for the actual Scheduled Task lifecycle.
+    .EXAMPLE
+        Start-L4D2Server
+    .NOTES
+        Throws under the same conditions as Start-GSMServer: missing
+        config, missing executable, or Scheduled Task registration/start
+        failure.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Start-GSMServer -FolderName 'L4D2' -Executable 'srcds.exe' -GetLaunchArgsFunctionName 'Get-L4D2LaunchArgs'
+}
+
+function Stop-L4D2Server {
+    <#
+    .SYNOPSIS
+        Stops the L4D2 server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Stop-GSMServer with this plugin's
+        FolderName.
+    .EXAMPLE
+        Stop-L4D2Server
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Stop-GSMServer -FolderName 'L4D2'
+}
+
+function Restart-L4D2Server {
+    <#
+    .SYNOPSIS
+        Restarts the L4D2 server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Restart-GSMServer with this plugin's
+        FolderName, Executable, and launch-argument function name.
+    .EXAMPLE
+        Restart-L4D2Server
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Restart-GSMServer -FolderName 'L4D2' -Executable 'srcds.exe' -GetLaunchArgsFunctionName 'Get-L4D2LaunchArgs'
+}
+
+function Get-L4D2ServerStatus {
+    <#
+    .SYNOPSIS
+        Reports the L4D2 server's running status.
+    .DESCRIPTION
+        Thin wrapper: delegates to Get-GSMServerStatus with this plugin's
+        FolderName. Returns 'Running', 'Stopped', or 'Crashed'.
+    .EXAMPLE
+        Get-L4D2ServerStatus
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    return Get-GSMServerStatus -FolderName 'L4D2'
+}
+
+function New-L4D2Config {
+    <#
+    .SYNOPSIS
+        Interactively creates or updates L4D2's server config.
+    .DESCRIPTION
+        Thin wrapper: delegates to New-GSMServerConfig with this plugin's
+        FolderName, GameName, AppID, DefaultPort, Maps/ServerConfig/Modes
+        function names, -RequiresMode (Left 4 Dead 2 has a genuine
+        selectable Mode, e.g. coop), and -SupportsWorkshop.
+    .EXAMPLE
+        New-L4D2Config
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return New-GSMServerConfig -FolderName 'L4D2' -GameName 'Left4Dead' -AppID '222860' -DefaultPort 27015 `
+        -GetMapsFunctionName 'Get-L4D2Maps' -TestServerConfigFunctionName 'Test-L4D2ServerConfig' `
+        -RequiresMode -GetModesFunctionName 'Get-L4D2Modes' -SupportsWorkshop
+}
+
+Export-ModuleMember -Function Get-L4D2LaunchArgs, Test-L4D2ServerConfig, Start-L4D2Server, Stop-L4D2Server, Restart-L4D2Server, Get-L4D2ServerStatus, New-L4D2Config
