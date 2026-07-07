@@ -1,0 +1,10 @@
+{
+  "GameName": "Left4Dead",
+  "AppID": "222860",
+  "DefaultPort": 27015,
+  "Map": "c1m1_hotel",
+  "Mode": "coop",
+  "MaxPlayers": 8,
+  "RCONPassword": "",
+  "WorkshopItems": []
+}
