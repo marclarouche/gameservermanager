@@ -184,7 +184,7 @@ least-privilege account, with no manual file editing.
 
 | Version | Milestone |
 |---|---|
-| v0.1.0 | Foundation (this scaffold + Core skeleton) |
+| v0.1.0 | Phase 1 complete: full framework, all five game plugins, tests passing |
 | v0.2.0 | Server Management |
 | v0.3.0 | Administration |
 | v0.4.0 | Monitoring |
@@ -197,3 +197,7 @@ least-privilege account, with no manual file editing.
 - Least-privilege service account provisioning moves into Phase 1
   (`Core/ServiceAccount.psm1`). Wiring that account into actual service
   start/stop still happens in `Core/Service.psm1`, Phase 2.
+- v0.1.0 tag marks Phase 1 completion (full framework + five plugins), not
+  just the initial scaffold. The §12 table description was written early
+  and undersold what Phase 1 actually delivered; this entry documents the
+  correction so later phase versioning isn't read against a stale baseline.
