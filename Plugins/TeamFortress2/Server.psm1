@@ -10,7 +10,18 @@
     stop, or monitor any process.
 .NOTES
     Functions implemented: Get-TeamFortress2LaunchArgs,
-    Test-TeamFortress2ServerConfig.
+    Test-TeamFortress2ServerConfig, Start-TeamFortress2Server,
+    Stop-TeamFortress2Server, Restart-TeamFortress2Server,
+    Get-TeamFortress2ServerStatus, New-TeamFortress2Config.
+
+    Start/Stop/Restart/Status (PRD section 8 item 11) and Configure (item
+    12) are now implemented as thin wrappers around Core/ProcessManager.psm1
+    and Core/ConfigEditor.psm1 respectively: this module only supplies its
+    own identity (FolderName, Executable, AppID, DefaultPort) and the names
+    of its own Get-TeamFortress2LaunchArgs / Get-TeamFortress2Maps /
+    Test-TeamFortress2ServerConfig functions; the actual Scheduled Task
+    lifecycle and interactive prompting/backup/write logic lives entirely in
+    those two Core modules.
 
     *** MODE-FIELD DESIGN DECISION ***
     Insurgency2014's config has both a Map and a Mode field, because that
@@ -40,6 +51,8 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Maps.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Modes.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ProcessManager.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ConfigEditor.psm1') -Force
 
 function Get-TeamFortress2ConfigPropertyValue {
     # Internal helper. Not exported: reads a property from a config psobject
@@ -215,4 +228,99 @@ function Get-TeamFortress2LaunchArgs {
     return $arguments.ToArray()
 }
 
-Export-ModuleMember -Function Get-TeamFortress2LaunchArgs, Test-TeamFortress2ServerConfig
+function Start-TeamFortress2Server {
+    <#
+    .SYNOPSIS
+        Starts the TeamFortress2 server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Start-GSMServer with this plugin's
+        FolderName, Executable, and launch-argument function name. See
+        Core/ProcessManager.psm1 for the actual Scheduled Task lifecycle.
+    .EXAMPLE
+        Start-TeamFortress2Server
+    .NOTES
+        Throws under the same conditions as Start-GSMServer: missing
+        config, missing executable, or Scheduled Task registration/start
+        failure.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Start-GSMServer -FolderName 'TeamFortress2' -Executable 'srcds.exe' -GetLaunchArgsFunctionName 'Get-TeamFortress2LaunchArgs'
+}
+
+function Stop-TeamFortress2Server {
+    <#
+    .SYNOPSIS
+        Stops the TeamFortress2 server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Stop-GSMServer with this plugin's
+        FolderName.
+    .EXAMPLE
+        Stop-TeamFortress2Server
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Stop-GSMServer -FolderName 'TeamFortress2'
+}
+
+function Restart-TeamFortress2Server {
+    <#
+    .SYNOPSIS
+        Restarts the TeamFortress2 server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Restart-GSMServer with this plugin's
+        FolderName, Executable, and launch-argument function name.
+    .EXAMPLE
+        Restart-TeamFortress2Server
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Restart-GSMServer -FolderName 'TeamFortress2' -Executable 'srcds.exe' -GetLaunchArgsFunctionName 'Get-TeamFortress2LaunchArgs'
+}
+
+function Get-TeamFortress2ServerStatus {
+    <#
+    .SYNOPSIS
+        Reports the TeamFortress2 server's running status.
+    .DESCRIPTION
+        Thin wrapper: delegates to Get-GSMServerStatus with this plugin's
+        FolderName. Returns 'Running', 'Stopped', or 'Crashed'.
+    .EXAMPLE
+        Get-TeamFortress2ServerStatus
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    return Get-GSMServerStatus -FolderName 'TeamFortress2'
+}
+
+function New-TeamFortress2Config {
+    <#
+    .SYNOPSIS
+        Interactively creates or updates TeamFortress2's server config.
+    .DESCRIPTION
+        Thin wrapper: delegates to New-GSMServerConfig with this plugin's
+        FolderName, GameName, AppID, DefaultPort, and its own Maps and
+        ServerConfig function names, plus -SupportsWorkshop. -RequiresMode
+        is deliberately NOT passed: this plugin has no separate Mode
+        config field (game mode is embedded in the map name prefix - see
+        the header comment on Test-TeamFortress2ServerConfig).
+    .EXAMPLE
+        New-TeamFortress2Config
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return New-GSMServerConfig -FolderName 'TeamFortress2' -GameName 'TeamFortress' -AppID '232250' -DefaultPort 27015 `
+        -GetMapsFunctionName 'Get-TeamFortress2Maps' -TestServerConfigFunctionName 'Test-TeamFortress2ServerConfig' -SupportsWorkshop
+}
+
+Export-ModuleMember -Function Get-TeamFortress2LaunchArgs, Test-TeamFortress2ServerConfig, Start-TeamFortress2Server, Stop-TeamFortress2Server, Restart-TeamFortress2Server, Get-TeamFortress2ServerStatus, New-TeamFortress2Config
