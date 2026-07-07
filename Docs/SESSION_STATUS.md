@@ -1,45 +1,107 @@
-# GSM Phase 1 Plugins - Session Status
+# GSM Phase 1 - Session Status
 
-Last updated: 2026-07-06
+Last updated: 2026-07-07
 
-## Where things stand
+## Where things stand: Phase 1 is fully complete
 
-All five Phase 1 plugins are now implemented, tested, and committed:
+All 13 PRD deliverables are shipped, tested, committed, and pushed. Nothing
+is left pending from Phase 1's scope.
 
-| Plugin | AppID | Workshop | Mode field | Map list | Status |
-|---|---|---|---|---|---|
-| Insurgency2014 | 237410 | Yes | Yes (suffix quirk: Checkpoint->coop) | 16 maps, closed list | Committed |
-| TeamFortress2 | 232250 | Yes | No (map prefix encodes mode) | 26 curated (of 220+ official) | Committed |
-| L4D | 222840 | No | Yes (mp_gamemode convar) | 22 maps, closed list | Committed |
-| CounterStrikeSource | 232330 | No | No (map prefix encodes mode) | 18 maps, closed list | Committed |
-| L4D2 | 222860 | Yes | Not started | Not started | **Not started** |
+Every one of the five plugins (Insurgency2014, TeamFortress2,
+CounterStrikeSource, L4D, L4D2) now implements all six lifecycle actions
+consistently:
 
-Each plugin has the same four modules (Install.psm1, Server.psm1, Maps.psm1, Modes.psm1), a Config.template.json, and four Pester test files (Tests/<Plugin>.Install/Maps/Modes/Server.Tests.ps1).
+| Action | Implemented via |
+|---|---|
+| Install | Plugin's own `Install.psm1`, calling `Core/SteamCMD.psm1` |
+| Start / Stop / Restart / Status | Thin wrappers in each plugin's `Server.psm1`, delegating to `Core/ProcessManager.psm1` |
+| Configure | Thin wrapper `New-<Game>Config` in each plugin's `Server.psm1`, delegating to `Core/ConfigEditor.psm1` |
 
-Current full-suite Pester count: **214/214 passing** (as of the CounterStrikeSource commit). PSScriptAnalyzer is clean on every plugin except the two pre-accepted categories: `PSUseShouldProcessForStateChangingFunctions` and `PSUseSingularNouns`.
+Test count: **325/325 passing**, run via `Tests/Run-AllTests.ps1` (not a bare
+`Invoke-Pester -Path .\Tests\` - see below). PSScriptAnalyzer is clean
+project-wide except the two pre-accepted categories:
+`PSUseShouldProcessForStateChangingFunctions` and `PSUseSingularNouns`.
 
-Insurgency2014's Maps.psm1 was retrofitted this session to read the shared `Config/CustomMaps.json` file (previously had no custom-map support at all) - this was committed as its own separate commit, before the four new-game plugins started.
+## What got built this session (in order)
 
-## Next task: L4D2
+1. **L4D2 plugin** (last of the five Phase 1 games) - Install/Server/Maps/
+   Modes/Config.template.json + four test files. Two judgment calls resolved
+   with Marc: exclude "The Last Stand" (community campaign, not Valve
+   in-house) from the map list, and exclude Realism Versus/Versus Survival
+   from the validated Mode enum (they're numbered Mutation slots
+   internally, not stable `mp_gamemode` values).
+2. **Documentation close-out #1** - CHANGELOG.md/PRD.md updated to mark
+   v0.1.0 as "Phase 1 complete" (at the time, that meant framework + five
+   plugins only - items 11/12 below didn't exist yet).
+3. **PRD items 11 & 12** (the actual big lift this session):
+   - `Core/ServiceAccount.psm1`: added `SeBatchLogonRight` (alongside the
+     existing `SeServiceLogonRight`), a `Servers` folder ACL entry, and
+     `Get-GSMServiceAccountCredential`.
+   - `Core/ProcessManager.psm1` (new): `Start-GSMServer`, `Stop-GSMServer`,
+     `Restart-GSMServer`, `Get-GSMServerStatus`. Launches servers via a
+     per-plugin **Scheduled Task** (not a native Windows Service) running as
+     the ServiceAccount - dedicated-server executables like `srcds.exe`
+     don't implement the Service Control Manager protocol, so registering
+     them as a real Windows Service would get them killed by Windows after
+     ~30 seconds. Native-service wrapping (via an NSSM-style tool) is still
+     Phase 2's `Core/Service.psm1`.
+   - `Core/ConfigEditor.psm1` (new): `New-GSMServerConfig`, a generic
+     interactive config editor taking Maps/Modes/validation function names
+     as parameters. Auto-backs up the existing config before overwriting.
+   - Five per-plugin `Server.psm1` files each got
+     `Start-<Game>Server`/`Stop-<Game>Server`/`Restart-<Game>Server`/
+     `Get-<Game>ServerStatus`/`New-<Game>Config` thin wrappers (built via
+     five parallel subagents, then independently re-verified file-by-file).
+   - `Menu.psm1`/`GSM.ps1` gained the `Restart` action.
+4. **Documentation close-out #2** - CHANGELOG.md/PRD.md updated again to
+   reflect that items 11/12 are genuinely done now, and to remove an
+   inaccurate "known gap" note about ServiceAccount's `secedit`/`Set-Acl`
+   calls being untested (they always had solid mocked coverage; the
+   original note was simply wrong).
+5. **`Tests/Run-AllTests.ps1`** (new, permanent fix) - runs every
+   `Tests/*.Tests.ps1` file in its own fresh `pwsh -NoProfile` child
+   process and aggregates pass/fail. This exists because a bare
+   `Invoke-Pester -Path .\Tests\` run shares one process across every test
+   file, and several plugins share bare module names (`Install`, `Server`,
+   `Maps`, `Modes`) - leftover global module state from one file's fixtures
+   was observed causing `Tests/Menu.Tests.ps1`'s dispatch tests to fail
+   only when run as part of the full suite, never in isolation. **Use this
+   script for the full suite from now on, not a bare `Invoke-Pester -Path
+   .\Tests\`.**
 
-Plugin.json already exists (do not touch it): `{"GameName": "Left4Dead", "Version": "2", "AppID": "222860", "Engine": "Source", "Executable": "srcds.exe", "DefaultPort": 27015, "SupportsWorkshop": true, "SupportsRCON": true}`.
+## Key naming convention (re-confirm if it comes up again)
 
-Build via a dedicated subagent (same pattern used for TeamFortress2/L4D/CounterStrikeSource): Install.psm1, Server.psm1, Maps.psm1, Modes.psm1, Config.template.json, and four test files, matching the conventions of all four existing plugins.
-
-Key things the subagent will need to get right (flag ambiguity rather than guess, per standing instruction):
-- L4D2 DOES support Workshop (unlike L4D/CounterStrikeSource) - include the `+sv_workshop_enabled` launch-arg pattern from Insurgency2014/TeamFortress2.
-- L4D2's map roster is much larger than L4D's: the 5 original L4D campaigns were ported in via Cold Stream/Last Stand updates using L4D2's own `c#m#_name` naming (different from L4D's `l4d_<location><NN>_<name>` naming - do not reuse L4D's internal map names), plus L4D2's own original campaigns (Dead Center, Dark Carnival, Swamp Fever, Hard Rain, The Parish) and DLC campaigns (The Passing, Cold Stream, The Sacrifice - verify each via an authoritative source such as left4dead.fandom.com, don't guess). This may end up being a TeamFortress2-style curated-subset situation or an L4D-style clean closed list - let the subagent determine which and document its reasoning either way, same as the prior two plugins did.
-- L4D2 game modes: Campaign, Versus, Survival, Scavenge, plus L4D2-added modes (Realism, Mutations, Realism Versus, Versus Survival per L4D's Modes.psm1 research notes) - verify against left4dead.fandom.com's Gameplay Modes page rather than assuming L4D's list plus Scavenge.
-- Same Mode-field design question as L4D (map names likely don't encode mode) vs TeamFortress2 (prefix encodes mode) - the subagent should verify which applies to L4D2, not assume it copies L4D's answer.
-- MaxPlayers range: L4D was narrowed to 1-8 per an explicit product decision (L4D2 has the same 4v4 Versus structure, so the same reasoning likely applies, but confirm rather than assume).
-- Known PSScriptAnalyzer gotchas from this session, worth passing to the subagent again:
-  1. Never let a comment-help continuation line start with a recognized keyword like `.NOTES` (corrupts the whole help block, causes a false PSProvideCommentHelp finding) - keep such references on one line.
-  2. Avoid pasting long verbatim web quotes into comments; paraphrase and stick to plain ASCII punctuation (no curly quotes, em-dashes, or ellipsis characters) to avoid a spurious `PSUseBOMForUnicodeEncodedFile` finding.
-  3. Every `return` path in a function declared `[OutputType([string[]])]` must be cast (`[string[]]$x` or `[string[]]@()`), even early-return empty-array branches, or PSScriptAnalyzer flags `PSUseOutputTypeCorrectly`.
+Everything is keyed by the plugin's **folder name**, never `Plugin.json`'s
+`GameName` field: `L4D` and `L4D2` both have `GameName: "Left4Dead"`, so
+`Config/<FolderName>.json`, `Config/ServerStatus/<FolderName>.json`,
+`Backups/<FolderName>-<timestamp>.json`, and Scheduled Task name
+`GSM-<FolderName>` all use the folder name specifically to avoid the two
+plugins silently colliding.
 
 ## Workflow reminders for continuing this
 
-- Marc runs Pester/PSScriptAnalyzer himself on his Windows machine (`D:\Projects\GSM\GameServerManager`) and pastes output back - this sandbox has no PowerShell installed.
-- Build each remaining plugin via a dedicated general-purpose subagent (per Marc's explicit instruction), verify the subagent's files directly (Read tool) before presenting to Marc, run the fix-review-rerun loop until clean, then commit with a message naming that specific game. One commit per plugin, not batched.
-- `Config/CustomMaps.json` is gitignored and already has all five plugin keys (`Insurgency2014`, `TeamFortress2`, `CounterStrikeSource`, `L4D`, `L4D2` - the `L4D2` key is present and empty, ready to use).
-- After L4D2 is done: final report needed - total Pester test count, confirmation all five Phase 1 plugins share the same shape, and confirmation of the Insurgency2014 Maps.psm1 retrofit.
+- Marc runs Pester/PSScriptAnalyzer/git himself on his Windows machine
+  (`D:\Projects\GSM\GameServerManager`) and pastes output back - this
+  sandbox has no PowerShell installed, and the bash-mounted copy of the repo
+  can lag behind real edits (confirmed stale at least twice this session) -
+  always verify file contents via the Read/Grep/Edit tools, not bash.
+- Run tests file-by-file in a fresh `pwsh -NoProfile` process (or via
+  `Tests/Run-AllTests.ps1` for the whole suite) - do not chain many
+  `Invoke-Pester` calls in one long-lived console session or run the whole
+  `Tests\` directory in one process; both cause cross-file state pollution
+  that produces phantom failures unrelated to the actual code.
+- Two PSScriptAnalyzer categories are pre-accepted project-wide and don't
+  need fixing: `PSUseShouldProcessForStateChangingFunctions`,
+  `PSUseSingularNouns`. Everything else must be genuinely fixed.
+
+## Next: Phase 2 - Server Management
+
+Not started. Per the PRD (`Docs/PRD.md` section 9), Phase 2 (~2,000 lines)
+adds:
+- `Core/Service.psm1`: wraps servers as genuine Windows Services via a
+  service-wrapper tool (e.g. NSSM), replacing today's Scheduled-Task-based
+  `Core/ProcessManager.psm1` approach.
+- Update and crash recovery.
+
+No scope, design, or file-list decisions have been made for Phase 2 yet -
+that's the first thing to work out whenever this picks back up.
