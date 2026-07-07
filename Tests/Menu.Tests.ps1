@@ -59,13 +59,79 @@ Export-ModuleMember -Function Install-GSMTestFakeGameServer
         }
 
         It 'returns $false without throwing when the plugin does not implement the action' {
+            # A fake plugin whose Server.psm1 defines no functions at all, so
+            # this test's premise ("action not implemented") doesn't depend
+            # on which actions a real Phase 1 plugin happens to implement
+            # yet - every real plugin now implements Start/Stop/Restart/
+            # Status/Configure.
+            New-Item -ItemType Directory -Path $script:FakePluginFolder -Force | Out-Null
+
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Plugin.json') -Value @'
+{"GameName":"GSMTestFakeGame","Version":"1","AppID":"999999","Engine":"Source","Executable":"fake.exe","DefaultPort":27015,"SupportsWorkshop":false,"SupportsRCON":false}
+'@
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Install.psm1') -Value 'Set-StrictMode -Version Latest'
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Server.psm1') -Value 'Set-StrictMode -Version Latest'
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Maps.psm1') -Value 'Set-StrictMode -Version Latest'
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Modes.psm1') -Value 'Set-StrictMode -Version Latest'
+
             Mock -ModuleName Menu -CommandName Write-GSMLog -MockWith { }
 
             $script:result = $null
-            { $script:result = Invoke-GSMAction -GameName 'Insurgency' -Action Start } | Should -Not -Throw
+            { $script:result = Invoke-GSMAction -GameName 'GSMTestFakeGame' -Action Start } | Should -Not -Throw
 
             $script:result | Should -Be $false
             Should -Invoke -ModuleName Menu -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Error' }
+        }
+
+        It 'dispatches the Restart action to Restart-<FolderName>Server' {
+            New-Item -ItemType Directory -Path $script:FakePluginFolder -Force | Out-Null
+
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Plugin.json') -Value @'
+{"GameName":"GSMTestFakeGame","Version":"1","AppID":"999999","Engine":"Source","Executable":"fake.exe","DefaultPort":27015,"SupportsWorkshop":false,"SupportsRCON":false}
+'@
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Install.psm1') -Value 'Set-StrictMode -Version Latest'
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Server.psm1') -Value @'
+Set-StrictMode -Version Latest
+function Restart-GSMTestFakeGameServer {
+    $global:GSMTestInvokedFunction = 'Restart-GSMTestFakeGameServer'
+}
+Export-ModuleMember -Function Restart-GSMTestFakeGameServer
+'@
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Maps.psm1') -Value 'Set-StrictMode -Version Latest'
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Modes.psm1') -Value 'Set-StrictMode -Version Latest'
+
+            $global:GSMTestInvokedFunction = $null
+            $result = Invoke-GSMAction -GameName 'GSMTestFakeGame' -Action Restart
+
+            $result | Should -Be $true
+            $global:GSMTestInvokedFunction | Should -Be 'Restart-GSMTestFakeGameServer'
+        }
+
+        It 'logs the returned value for the Status action instead of discarding it' {
+            Mock -ModuleName Menu -CommandName Write-GSMLog -MockWith { }
+
+            New-Item -ItemType Directory -Path $script:FakePluginFolder -Force | Out-Null
+
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Plugin.json') -Value @'
+{"GameName":"GSMTestFakeGame","Version":"1","AppID":"999999","Engine":"Source","Executable":"fake.exe","DefaultPort":27015,"SupportsWorkshop":false,"SupportsRCON":false}
+'@
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Install.psm1') -Value 'Set-StrictMode -Version Latest'
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Server.psm1') -Value @'
+Set-StrictMode -Version Latest
+function Get-GSMTestFakeGameServerStatus {
+    return 'Running'
+}
+Export-ModuleMember -Function Get-GSMTestFakeGameServerStatus
+'@
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Maps.psm1') -Value 'Set-StrictMode -Version Latest'
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Modes.psm1') -Value 'Set-StrictMode -Version Latest'
+
+            $result = Invoke-GSMAction -GameName 'GSMTestFakeGame' -Action Status
+
+            $result | Should -Be $true
+            Should -Invoke -ModuleName Menu -CommandName Write-GSMLog -Times 1 -ParameterFilter {
+                $Level -eq 'Info' -and $Message -match 'Running'
+            }
         }
     }
 }

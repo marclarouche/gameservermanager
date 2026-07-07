@@ -29,7 +29,7 @@ param(
     [string]$GameName,
 
     [Parameter()]
-    [ValidateSet('Install', 'Start', 'Stop', 'Status', 'Configure')]
+    [ValidateSet('Install', 'Start', 'Stop', 'Restart', 'Status', 'Configure')]
     [string]$Action
 )
 

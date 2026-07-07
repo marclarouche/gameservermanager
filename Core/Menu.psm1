@@ -14,13 +14,15 @@ Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Logging.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'PluginLoader.psm1') -Force
 
 # Maps each action to the plugin function name it expects, with {0} standing
-# in for the plugin's FolderName (e.g. 'Insurgency2014'). Start/Stop/Status
-# hooks don't exist until Core/Service.psm1 (Phase 2); Install and Configure
-# match the function names already sketched in the Phase 1 plugin stubs.
+# in for the plugin's FolderName (e.g. 'Insurgency2014'). Start/Stop/Restart/
+# Status are thin per-plugin wrappers around Core/ProcessManager.psm1
+# (PRD section 8, item 11); Configure is a thin per-plugin wrapper around
+# Core/ConfigEditor.psm1 (item 12).
 $script:GSMActionFunctionTemplates = @{
     Install   = 'Install-{0}Server'
     Start     = 'Start-{0}Server'
     Stop      = 'Stop-{0}Server'
+    Restart   = 'Restart-{0}Server'
     Status    = 'Get-{0}ServerStatus'
     Configure = 'New-{0}Config'
 }
@@ -46,10 +48,10 @@ function Invoke-GSMAction {
     .NOTES
         Expects the plugin folder to expose a function named per Action:
         Install-<FolderName>Server, Start-<FolderName>Server,
-        Stop-<FolderName>Server, Get-<FolderName>ServerStatus, or
-        New-<FolderName>Config. A plugin that doesn't implement the
-        requested action yet (true of every Phase 1 plugin today) results in
-        a logged error and $false, not a thrown exception.
+        Stop-<FolderName>Server, Restart-<FolderName>Server,
+        Get-<FolderName>ServerStatus, or New-<FolderName>Config. A plugin
+        that doesn't implement the requested action results in a logged
+        error and $false, not a thrown exception.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -58,7 +60,7 @@ function Invoke-GSMAction {
         [string]$GameName,
 
         [Parameter(Mandatory)]
-        [ValidateSet('Install', 'Start', 'Stop', 'Status', 'Configure')]
+        [ValidateSet('Install', 'Start', 'Stop', 'Restart', 'Status', 'Configure')]
         [string]$Action
     )
 
@@ -94,7 +96,18 @@ function Invoke-GSMAction {
     }
 
     try {
-        & $functionName | Out-Null
+        $result = & $functionName
+
+        # Status is the one action whose whole purpose is the value it
+        # returns (Running/Stopped/Crashed from Core/ProcessManager.psm1),
+        # so it's the one case where that return value is worth surfacing
+        # rather than discarding. Every other action's result is
+        # informational at best; Invoke-GSMAction's contract stays "$true on
+        # success, $false on failure" either way.
+        if ($Action -eq 'Status') {
+            Write-GSMLog -Level Info -Message "Status for plugin '$($plugin.FolderName)': $result"
+        }
+
         return $true
     }
     catch {
@@ -142,7 +155,7 @@ function Show-MainMenu {
             return
         }
 
-        $selectedAction = Read-GSMPrompt -Message 'Select an action (Install, Start, Stop, Status, Configure)' -ValidValues @('Install', 'Start', 'Stop', 'Status', 'Configure')
+        $selectedAction = Read-GSMPrompt -Message 'Select an action (Install, Start, Stop, Restart, Status, Configure)' -ValidValues @('Install', 'Start', 'Stop', 'Restart', 'Status', 'Configure')
 
         $succeeded = Invoke-GSMAction -GameName $selectedGame -Action $selectedAction
 
