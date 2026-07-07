@@ -143,16 +143,73 @@ Describe 'Core/ServiceAccount.psm1' {
         }
     }
 
+    Context 'Get-GSMServiceAccountCredential' {
+        BeforeEach {
+            # Built via AppendChar rather than ConvertTo-SecureString -AsPlainText,
+            # matching the 'Password never leaks' context above: PSScriptAnalyzer's
+            # PSAvoidUsingConvertToSecureStringWithPlainText rule flags that cmdlet
+            # unconditionally, even in test-only fixture code.
+            #
+            # PSUseShouldProcessForStateChangingFunctions flags the "New-" verb
+            # here too. Left as-is for the same reason as New-FakeGSMRoot above:
+            # a private test fixture, not part of the module, always called
+            # unconditionally within TestDrive.
+            function New-TestSecureStringFor([string]$PlainText) {
+                $secure = [securestring]::new()
+                foreach ($char in $PlainText.ToCharArray()) {
+                    $secure.AppendChar($char)
+                }
+                $secure.MakeReadOnly()
+                return $secure
+            }
+        }
+
+        It 'builds a PSCredential from the stored encrypted password' {
+            $fakeRoot = New-FakeGSMRoot
+            Mock -ModuleName ServiceAccount -CommandName Get-GSMRootPath -MockWith { $fakeRoot }
+
+            $securePassword = New-TestSecureStringFor 'Sup3rSecretPassphrase!'
+            $encrypted = $securePassword | ConvertFrom-SecureString
+            Set-Content -Path (Join-Path $fakeRoot 'Config/ServiceAccount.secure.txt') -Value $encrypted
+
+            $credential = Get-GSMServiceAccountCredential -AccountName 'GSM-Test'
+
+            $credential | Should -BeOfType [pscredential]
+            $credential.UserName | Should -Be 'GSM-Test'
+            $credential.GetNetworkCredential().Password | Should -Be 'Sup3rSecretPassphrase!'
+        }
+
+        It 'defaults AccountName to GSM-ServiceAccount' {
+            $fakeRoot = New-FakeGSMRoot
+            Mock -ModuleName ServiceAccount -CommandName Get-GSMRootPath -MockWith { $fakeRoot }
+
+            $securePassword = New-TestSecureStringFor 'AnotherSecretPassphrase!'
+            $encrypted = $securePassword | ConvertFrom-SecureString
+            Set-Content -Path (Join-Path $fakeRoot 'Config/ServiceAccount.secure.txt') -Value $encrypted
+
+            $credential = Get-GSMServiceAccountCredential
+
+            $credential.UserName | Should -Be 'GSM-ServiceAccount'
+        }
+
+        It 'throws a clear, actionable error when no stored credential file exists' {
+            $fakeRoot = New-FakeGSMRoot
+            Mock -ModuleName ServiceAccount -CommandName Get-GSMRootPath -MockWith { $fakeRoot }
+
+            { Get-GSMServiceAccountCredential -AccountName 'GSM-Test' } | Should -Throw '*New-GSMServiceAccount*'
+        }
+    }
+
     Context 'Test-GSMServiceAccount' {
         BeforeEach {
             Mock -ModuleName ServiceAccount -CommandName Test-GSMAccountPresence -MockWith { $true }
             Mock -ModuleName ServiceAccount -CommandName Test-GSMAccountIsAdminMember -MockWith { $false }
-            Mock -ModuleName ServiceAccount -CommandName Test-GSMServiceLogonRight -MockWith { $true }
+            Mock -ModuleName ServiceAccount -CommandName Test-GSMUserRight -MockWith { $true }
             Mock -ModuleName ServiceAccount -CommandName Test-GSMExpectedFolderPermission -MockWith { $true }
             Mock -ModuleName ServiceAccount -CommandName Write-GSMLog -MockWith { }
         }
 
-        It 'returns $true when all four conditions are met' {
+        It 'returns $true when all five conditions are met' {
             Test-GSMServiceAccount -AccountName 'GSM-Test' | Should -Be $true
         }
 
@@ -169,7 +226,13 @@ Describe 'Core/ServiceAccount.psm1' {
         }
 
         It 'returns $false when SeServiceLogonRight is missing' {
-            Mock -ModuleName ServiceAccount -CommandName Test-GSMServiceLogonRight -MockWith { $false }
+            Mock -ModuleName ServiceAccount -CommandName Test-GSMUserRight -ParameterFilter { $RightName -eq 'SeServiceLogonRight' } -MockWith { $false }
+
+            Test-GSMServiceAccount -AccountName 'GSM-Test' | Should -Be $false
+        }
+
+        It 'returns $false when SeBatchLogonRight is missing' {
+            Mock -ModuleName ServiceAccount -CommandName Test-GSMUserRight -ParameterFilter { $RightName -eq 'SeBatchLogonRight' } -MockWith { $false }
 
             Test-GSMServiceAccount -AccountName 'GSM-Test' | Should -Be $false
         }
@@ -212,7 +275,7 @@ Describe 'Core/ServiceAccount.psm1' {
             Mock -ModuleName ServiceAccount -CommandName Set-Acl -MockWith { }
         }
 
-        It 'exports and re-imports user rights via secedit, granting SeServiceLogonRight to the account SID' {
+        It 'exports and re-imports user rights via a single secedit round-trip, granting SeServiceLogonRight and SeBatchLogonRight to the account SID' {
             Set-GSMServiceAccountRights -AccountName 'GSM-Test'
 
             Should -Invoke -ModuleName ServiceAccount -CommandName Start-Process -Times 1 -ParameterFilter {
@@ -235,13 +298,29 @@ Describe 'Core/ServiceAccount.psm1' {
                 $ArgumentList[6] -eq 'USER_RIGHTS'
             }
 
+            # Both rights are granted in the SAME secedit round-trip: still
+            # just one export call and one configure call, not two of each.
             Should -Invoke -ModuleName ServiceAccount -CommandName Start-Process -Times 2
 
             $script:CapturedCfgContent | Should -Match 'SeServiceLogonRight'
-            $script:CapturedCfgContent | Should -Match ([regex]::Escape("*$script:FakeSid"))
+            $script:CapturedCfgContent | Should -Match 'SeBatchLogonRight'
+            ($script:CapturedCfgContent -split "`n" | Where-Object { $_ -match '^SeServiceLogonRight' }) | Should -Match ([regex]::Escape("*$script:FakeSid"))
+            ($script:CapturedCfgContent -split "`n" | Where-Object { $_ -match '^SeBatchLogonRight' }) | Should -Match ([regex]::Escape("*$script:FakeSid"))
         }
 
-        It 'grants Modify (not FullControl) via Set-Acl on exactly the five expected folders' {
+        It 'preserves an existing right''s other SIDs and appends the account rather than replacing the line' {
+            Mock -ModuleName ServiceAccount -CommandName Get-Content -MockWith {
+                @('[Version]', '[Privilege Rights]', 'SeServiceLogonRight = *S-1-5-80-1234567890')
+            }
+
+            Set-GSMServiceAccountRights -AccountName 'GSM-Test'
+
+            $serviceLogonLine = ($script:CapturedCfgContent -split "`n" | Where-Object { $_ -match '^SeServiceLogonRight' })
+            $serviceLogonLine | Should -Match ([regex]::Escape('*S-1-5-80-1234567890'))
+            $serviceLogonLine | Should -Match ([regex]::Escape("*$script:FakeSid"))
+        }
+
+        It 'grants Modify (not FullControl) via Set-Acl on exactly the six expected folders' {
             $script:CapturedSetAclCalls = [System.Collections.Generic.List[object]]::new()
             Mock -ModuleName ServiceAccount -CommandName Set-Acl -MockWith {
                 param($Path, $AclObject)
@@ -250,10 +329,10 @@ Describe 'Core/ServiceAccount.psm1' {
 
             Set-GSMServiceAccountRights -AccountName 'GSM-Test'
 
-            Should -Invoke -ModuleName ServiceAccount -CommandName Get-Acl -Times 5
-            $script:CapturedSetAclCalls.Count | Should -Be 5
+            Should -Invoke -ModuleName ServiceAccount -CommandName Get-Acl -Times 6
+            $script:CapturedSetAclCalls.Count | Should -Be 6
 
-            foreach ($folder in 'Config', 'Logs', 'Reports', 'Backups', 'SteamCMD') {
+            foreach ($folder in 'Config', 'Logs', 'Reports', 'Backups', 'SteamCMD', 'Servers') {
                 $expectedPath = Join-Path $script:FakeRoot $folder
                 $call = $script:CapturedSetAclCalls | Where-Object { $_.Path -eq $expectedPath }
 
@@ -279,8 +358,8 @@ Describe 'Core/ServiceAccount.psm1' {
                 $call.AclObject.AddedRules[0].AccessControlType | Should -Be ([System.Security.AccessControl.AccessControlType]::Allow) -Because "folder '$folder'"
             }
 
-            # No folders outside the configured five.
-            $expectedPaths = 'Config', 'Logs', 'Reports', 'Backups', 'SteamCMD' | ForEach-Object { Join-Path $script:FakeRoot $_ }
+            # No folders outside the configured six.
+            $expectedPaths = 'Config', 'Logs', 'Reports', 'Backups', 'SteamCMD', 'Servers' | ForEach-Object { Join-Path $script:FakeRoot $_ }
             $script:CapturedSetAclCalls | Where-Object { $_.Path -notin $expectedPaths } | Should -BeNullOrEmpty
         }
 
@@ -301,7 +380,7 @@ Describe 'Core/ServiceAccount.psm1' {
                 [PSCustomObject]@{ ExitCode = 3 }
             }
 
-            { Set-GSMServiceAccountRights -AccountName 'GSM-Test' } | Should -Throw '*SeServiceLogonRight*'
+            { Set-GSMServiceAccountRights -AccountName 'GSM-Test' } | Should -Throw '*SeServiceLogonRight*SeBatchLogonRight*'
 
             Should -Invoke -ModuleName ServiceAccount -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Error' }
             Should -Invoke -ModuleName ServiceAccount -CommandName Get-Acl -Times 0
@@ -322,16 +401,12 @@ Describe 'Core/ServiceAccount.psm1' {
             }
 
             # Config (first folder) succeeded, Logs (second) failed and threw: Reports,
-            # Backups, and SteamCMD must never be reached.
+            # Backups, SteamCMD, and Servers must never be reached.
             Should -Invoke -ModuleName ServiceAccount -CommandName Set-Acl -Times 2
-            Should -Invoke -ModuleName ServiceAccount -CommandName Set-Acl -Times 0 -ParameterFilter {
-                $Path -eq (Join-Path $script:FakeRoot 'Reports')
-            }
-            Should -Invoke -ModuleName ServiceAccount -CommandName Set-Acl -Times 0 -ParameterFilter {
-                $Path -eq (Join-Path $script:FakeRoot 'Backups')
-            }
-            Should -Invoke -ModuleName ServiceAccount -CommandName Set-Acl -Times 0 -ParameterFilter {
-                $Path -eq (Join-Path $script:FakeRoot 'SteamCMD')
+            foreach ($untouchedFolder in 'Reports', 'Backups', 'SteamCMD', 'Servers') {
+                Should -Invoke -ModuleName ServiceAccount -CommandName Set-Acl -Times 0 -ParameterFilter {
+                    $Path -eq (Join-Path $script:FakeRoot $untouchedFolder)
+                }
             }
         }
     }

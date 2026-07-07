@@ -5,11 +5,17 @@
 .DESCRIPTION
     Phase 1. Creates and configures a dedicated local Windows account under
     which game servers run, instead of the interactive admin account. Grants
-    only what's needed: SeServiceLogonRight and Modify access to GSM's
-    install/config/log/backup folders. Does not grant local admin rights.
+    only what's needed: SeServiceLogonRight (log on as a service - reserved
+    for a future Phase 1 Windows Service registration, Core/Service.psm1),
+    SeBatchLogonRight (log on as a batch job - used today by
+    Core/ProcessManager.psm1's Scheduled Task-based server launch), and
+    Modify access to GSM's install/config/log/backup/server folders. Does not
+    grant local admin rights.
 
-    This module only provisions the account. Using that account to actually
-    run a server as a Windows service is Core/Service.psm1 (Phase 2).
+    This module only provisions the account. Registering a real Windows
+    Service under this account (with a service wrapper, since srcds.exe and
+    similar dedicated-server executables don't speak the Service Control
+    Manager protocol) is Core/Service.psm1 (Phase 2).
 #>
 
 Set-StrictMode -Version Latest
@@ -18,7 +24,10 @@ Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Utilities.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Logging.psm1') -Force
 
 # Folders the service account needs Modify (not Full Control) access to.
-$script:GSMServiceAccountFolders = @('Config', 'Logs', 'Reports', 'Backups', 'SteamCMD')
+# 'Servers' holds each plugin's installed game files, which the account
+# needs write access to while a server it launches is running (logs,
+# addon/workshop content, save data, etc.).
+$script:GSMServiceAccountFolders = @('Config', 'Logs', 'Reports', 'Backups', 'SteamCMD', 'Servers')
 
 function Test-GSMElevation {
     # Internal helper. Not exported: returns whether the current process is
@@ -105,7 +114,7 @@ function Get-GSMAccountSID {
 }
 
 function Test-GSMAccountPresence {
-    # Internal helper. Not exported: one of Test-GSMServiceAccount's four
+    # Internal helper. Not exported: one of Test-GSMServiceAccount's
     # independently checked conditions.
     [CmdletBinding()]
     [OutputType([bool])]
@@ -118,7 +127,7 @@ function Test-GSMAccountPresence {
 }
 
 function Test-GSMAccountIsAdminMember {
-    # Internal helper. Not exported: one of Test-GSMServiceAccount's four
+    # Internal helper. Not exported: one of Test-GSMServiceAccount's
     # independently checked conditions.
     [CmdletBinding()]
     [OutputType([bool])]
@@ -139,14 +148,21 @@ function Test-GSMAccountIsAdminMember {
     return $false
 }
 
-function Grant-GSMServiceLogonRight {
-    # Internal helper. Not exported: grants SeServiceLogonRight to AccountName
-    # via secedit export/edit/import, since no PowerShell cmdlet manages user
-    # rights assignments directly.
+function Grant-GSMUserRights {
+    # Internal helper. Not exported: grants one or more user-rights-assignment
+    # privileges (e.g. SeServiceLogonRight, SeBatchLogonRight) to AccountName
+    # in a single secedit export/edit/import round-trip, since no PowerShell
+    # cmdlet manages user rights assignments directly. Granting multiple
+    # rights in one round-trip (rather than one secedit export/configure
+    # cycle per right) halves the number of secedit.exe invocations and the
+    # number of places a partial failure could leave things inconsistent.
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$AccountName
+        [string]$AccountName,
+
+        [Parameter(Mandatory)]
+        [string[]]$RightNames
     )
 
     $sid = Get-GSMAccountSID -AccountName $AccountName
@@ -166,38 +182,47 @@ function Grant-GSMServiceLogonRight {
 
         $lines = Get-Content -Path $cfgPath
         $updatedLines = [System.Collections.Generic.List[string]]::new()
-        $foundLine = $false
+        $foundRights = @{}
+        foreach ($rightName in $RightNames) {
+            $foundRights[$rightName] = $false
+        }
 
         foreach ($line in $lines) {
-            if ($line -match '^\s*SeServiceLogonRight\s*=\s*(.*)$') {
-                $foundLine = $true
+            $matchedRight = $RightNames | Where-Object { $line -match "^\s*$([regex]::Escape($_))\s*=\s*(.*)$" } | Select-Object -First 1
+
+            if ($matchedRight) {
+                $null = $line -match "^\s*$([regex]::Escape($matchedRight))\s*=\s*(.*)$"
+                $foundRights[$matchedRight] = $true
                 $existingSids = @($Matches[1].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
                 if ($existingSids -notcontains $sidToken) {
                     $existingSids += $sidToken
                 }
-                $updatedLines.Add('SeServiceLogonRight = ' + ($existingSids -join ','))
+                $updatedLines.Add("$matchedRight = " + ($existingSids -join ','))
             }
             else {
                 $updatedLines.Add($line)
             }
         }
 
-        if (-not $foundLine) {
-            $withInsertedRight = [System.Collections.Generic.List[string]]::new()
+        $missingRightNames = @($RightNames | Where-Object { -not $foundRights[$_] })
+        if ($missingRightNames.Count -gt 0) {
+            $withInsertedRights = [System.Collections.Generic.List[string]]::new()
             foreach ($line in $updatedLines) {
-                $withInsertedRight.Add($line)
+                $withInsertedRights.Add($line)
                 if ($line.Trim() -eq '[Privilege Rights]') {
-                    $withInsertedRight.Add("SeServiceLogonRight = $sidToken")
+                    foreach ($missingRightName in $missingRightNames) {
+                        $withInsertedRights.Add("$missingRightName = $sidToken")
+                    }
                 }
             }
-            $updatedLines = $withInsertedRight
+            $updatedLines = $withInsertedRights
         }
 
         Set-Content -Path $cfgPath -Value $updatedLines
 
         $configureProcess = Start-Process -FilePath 'secedit.exe' -ArgumentList @('/configure', '/db', $dbPath, '/cfg', $cfgPath, '/areas', 'USER_RIGHTS') -Wait -NoNewWindow -PassThru -ErrorAction Stop
         if ($configureProcess.ExitCode -ne 0) {
-            throw "secedit.exe /configure exited with code $($configureProcess.ExitCode) while granting SeServiceLogonRight."
+            throw "secedit.exe /configure exited with code $($configureProcess.ExitCode) while granting $($RightNames -join ', ')."
         }
     }
     finally {
@@ -205,14 +230,18 @@ function Grant-GSMServiceLogonRight {
     }
 }
 
-function Test-GSMServiceLogonRight {
-    # Internal helper. Not exported: one of Test-GSMServiceAccount's four
-    # independently checked conditions.
+function Test-GSMUserRight {
+    # Internal helper. Not exported: one of Test-GSMServiceAccount's
+    # independently checked conditions. Checks a single named user-rights
+    # -assignment privilege (e.g. SeServiceLogonRight or SeBatchLogonRight).
     [CmdletBinding()]
     [OutputType([bool])]
     param(
         [Parameter(Mandatory)]
-        [string]$AccountName
+        [string]$AccountName,
+
+        [Parameter(Mandatory)]
+        [string]$RightName
     )
 
     try {
@@ -227,13 +256,13 @@ function Test-GSMServiceLogonRight {
     try {
         & secedit.exe /export /cfg $cfgPath /areas USER_RIGHTS | Out-Null
         $lines = Get-Content -Path $cfgPath -ErrorAction Stop
-        $rightLine = $lines | Where-Object { $_ -match '^\s*SeServiceLogonRight\s*=\s*(.*)$' } | Select-Object -First 1
+        $rightLine = $lines | Where-Object { $_ -match "^\s*$([regex]::Escape($RightName))\s*=\s*(.*)$" } | Select-Object -First 1
 
         if (-not $rightLine) {
             return $false
         }
 
-        $null = $rightLine -match '^\s*SeServiceLogonRight\s*=\s*(.*)$'
+        $null = $rightLine -match "^\s*$([regex]::Escape($RightName))\s*=\s*(.*)$"
         $sids = @($Matches[1].Split(',') | ForEach-Object { $_.Trim() })
         return ($sids -contains "*$sid")
     }
@@ -246,7 +275,7 @@ function Test-GSMServiceLogonRight {
 }
 
 function Test-GSMExpectedFolderPermission {
-    # Internal helper. Not exported: one of Test-GSMServiceAccount's four
+    # Internal helper. Not exported: one of Test-GSMServiceAccount's
     # independently checked conditions.
     [CmdletBinding()]
     [OutputType([bool])]
@@ -371,17 +400,20 @@ function Set-GSMServiceAccountRights {
         Grants GSM's service account exactly the rights it needs to run
         servers.
     .DESCRIPTION
-        Grants SeServiceLogonRight (log on as a service) via secedit, and
-        Modify (not Full Control) NTFS permission on Config/, Logs/,
-        Reports/, Backups/, and SteamCMD/, all resolved via Get-GSMRootPath.
-        Grants nothing beyond these two things: no local admin, no ownership
-        changes, no permissions on folders outside this list.
+        Grants SeServiceLogonRight (log on as a service, reserved for a
+        future real Windows Service registration) and SeBatchLogonRight (log
+        on as a batch job, used today by Core/ProcessManager.psm1's
+        Scheduled Task-based server launch) via secedit, and Modify (not
+        Full Control) NTFS permission on Config/, Logs/, Reports/, Backups/,
+        SteamCMD/, and Servers/, all resolved via Get-GSMRootPath. Grants
+        nothing beyond these: no local admin, no ownership changes, no
+        permissions on folders outside this list.
     .PARAMETER AccountName
         Name of the local service account to grant rights to.
     .EXAMPLE
         Set-GSMServiceAccountRights -AccountName 'GSM-ServiceAccount'
     .NOTES
-        Throws if granting the logon right or any folder's ACL fails.
+        Throws if granting either user right or any folder's ACL fails.
     #>
     [CmdletBinding()]
     param(
@@ -390,10 +422,10 @@ function Set-GSMServiceAccountRights {
     )
 
     try {
-        Grant-GSMServiceLogonRight -AccountName $AccountName
+        Grant-GSMUserRights -AccountName $AccountName -RightNames @('SeServiceLogonRight', 'SeBatchLogonRight')
     }
     catch {
-        Write-GSMLog -Level Error -Message "Failed to grant SeServiceLogonRight to '$AccountName': $($_.Exception.Message)"
+        Write-GSMLog -Level Error -Message "Failed to grant user rights to '$AccountName': $($_.Exception.Message)"
         throw
     }
 
@@ -427,17 +459,18 @@ function Test-GSMServiceAccount {
         Verifies GSM's service account exists and has exactly the expected
         rights.
     .DESCRIPTION
-        Checks four conditions independently: the account exists, it is not
-        a member of Administrators, it has SeServiceLogonRight, and it has
-        the expected Modify ACL on Config/, Logs/, Reports/, Backups/, and
-        SteamCMD/. Returns $true only if all four hold. Each failing
-        condition is logged via Write-GSMLog with the specific reason.
+        Checks five conditions independently: the account exists, it is not
+        a member of Administrators, it has SeServiceLogonRight, it has
+        SeBatchLogonRight, and it has the expected Modify ACL on Config/,
+        Logs/, Reports/, Backups/, SteamCMD/, and Servers/. Returns $true
+        only if all five hold. Each failing condition is logged via
+        Write-GSMLog with the specific reason.
     .PARAMETER AccountName
         Name of the local service account to verify.
     .EXAMPLE
         Test-GSMServiceAccount -AccountName 'GSM-ServiceAccount'
     .NOTES
-        All four conditions are checked (not short-circuited), so every
+        All five conditions are checked (not short-circuited), so every
         failing reason gets logged in a single call.
     #>
     [CmdletBinding()]
@@ -459,8 +492,13 @@ function Test-GSMServiceAccount {
         $isValid = $false
     }
 
-    if (-not (Test-GSMServiceLogonRight -AccountName $AccountName)) {
+    if (-not (Test-GSMUserRight -AccountName $AccountName -RightName 'SeServiceLogonRight')) {
         Write-GSMLog -Level Error -Message "Service account '$AccountName' does not have SeServiceLogonRight."
+        $isValid = $false
+    }
+
+    if (-not (Test-GSMUserRight -AccountName $AccountName -RightName 'SeBatchLogonRight')) {
+        Write-GSMLog -Level Error -Message "Service account '$AccountName' does not have SeBatchLogonRight."
         $isValid = $false
     }
 
@@ -483,10 +521,11 @@ function Remove-GSMServiceAccount {
     .EXAMPLE
         Remove-GSMServiceAccount -AccountName 'GSM-ServiceAccount'
     .NOTES
-        Removing the account leaves its SeServiceLogonRight secedit entry
-        behind, referencing a SID that no longer resolves to anything. This
-        orphaned entry is harmless (Windows ignores rights entries for SIDs
-        that don't exist) and cleaning it up is out of scope for Phase 1.
+        Removing the account leaves its secedit user-rights entries behind,
+        referencing a SID that no longer resolves to anything. These
+        orphaned entries are harmless (Windows ignores rights entries for
+        SIDs that don't exist) and cleaning them up is out of scope for
+        Phase 1.
     #>
     [CmdletBinding()]
     param(
@@ -503,4 +542,59 @@ function Remove-GSMServiceAccount {
     }
 }
 
-Export-ModuleMember -Function New-GSMServiceAccount, Set-GSMServiceAccountRights, Test-GSMServiceAccount, Remove-GSMServiceAccount
+function Get-GSMServiceAccountCredential {
+    <#
+    .SYNOPSIS
+        Builds a PSCredential for GSM's service account from its stored,
+        DPAPI-encrypted password.
+    .DESCRIPTION
+        Reads Config/ServiceAccount.secure.txt (written by
+        New-GSMServiceAccount), decrypts it via ConvertTo-SecureString
+        (which only succeeds for the same Windows user and machine that
+        encrypted it), and returns a PSCredential built from AccountName and
+        the decrypted password.
+    .PARAMETER AccountName
+        Name of the local service account. Defaults to 'GSM-ServiceAccount'.
+    .EXAMPLE
+        $credential = Get-GSMServiceAccountCredential
+    .NOTES
+        Core/ProcessManager.psm1 uses this to register a Scheduled Task that
+        runs a game server as this account. Registering a Scheduled Task
+        with a stored credential requires Windows Task Scheduler's own API
+        to receive the password as a plain string at registration time -
+        there is no SecureString-accepting overload for
+        Register-ScheduledTask. That is a Windows API limitation, not a
+        design choice made here. Callers must extract the plaintext (via
+        this credential's GetNetworkCredential().Password) only immediately
+        before calling Register-ScheduledTask, and must never log or persist
+        it.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscredential])]
+    param(
+        [Parameter()]
+        [string]$AccountName = 'GSM-ServiceAccount'
+    )
+
+    $secureFilePath = Join-Path -Path (Get-GSMRootPath) -ChildPath 'Config/ServiceAccount.secure.txt'
+
+    if (-not (Test-Path -Path $secureFilePath -PathType Leaf)) {
+        throw "No stored credential found for '$AccountName' at '$secureFilePath'. Run New-GSMServiceAccount first."
+    }
+
+    try {
+        # .Trim() matters here: Get-Content -Raw returns the file's exact
+        # bytes, trailing newline included (Set-Content always appends one),
+        # and ConvertTo-SecureString rejects that trailing whitespace as an
+        # invalid format.
+        $encryptedPassword = (Get-Content -Path $secureFilePath -Raw -ErrorAction Stop).Trim()
+        $securePassword = ConvertTo-SecureString -String $encryptedPassword -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to decrypt the stored credential for '$AccountName': $($_.Exception.Message)"
+    }
+
+    return [pscredential]::new($AccountName, $securePassword)
+}
+
+Export-ModuleMember -Function New-GSMServiceAccount, Set-GSMServiceAccountRights, Test-GSMServiceAccount, Remove-GSMServiceAccount, Get-GSMServiceAccountCredential
