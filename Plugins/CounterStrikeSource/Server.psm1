@@ -3,14 +3,15 @@
 .SYNOPSIS
     Counter-Strike: Source server lifecycle and launch parameters.
 .DESCRIPTION
-    Phase 1 (launch params, config validation) / Phase 2 (start/stop/restart
-    via Core/Service.psm1, the pre-Service.psm1 task in PRD section 8 item
-    11). This module only builds the srcds.exe launch parameter string from
-    a config object and validates that config object; it does not start,
-    stop, or monitor any process.
+    Builds the srcds.exe launch parameter string from a config object and
+    validates that config object, and provides start/stop/restart/status
+    and interactive config-editing wrappers around the shared
+    Core/ProcessManager.psm1 and Core/ConfigEditor.psm1 modules.
 .NOTES
     Functions implemented: Get-CounterStrikeSourceLaunchArgs,
-    Test-CounterStrikeSourceServerConfig.
+    Test-CounterStrikeSourceServerConfig, Start-CounterStrikeSourceServer,
+    Stop-CounterStrikeSourceServer, Restart-CounterStrikeSourceServer,
+    Get-CounterStrikeSourceServerStatus, New-CounterStrikeSourceConfig.
 
     *** NO WORKSHOP SUPPORT ***
     Plugin.json declares "SupportsWorkshop": false for this plugin, so this
@@ -44,6 +45,8 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Maps.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Modes.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ProcessManager.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ConfigEditor.psm1') -Force
 
 function Get-CounterStrikeSourceConfigPropertyValue {
     # Internal helper. Not exported: reads a property from a config psobject
@@ -214,4 +217,101 @@ function Get-CounterStrikeSourceLaunchArgs {
     return $arguments.ToArray()
 }
 
-Export-ModuleMember -Function Get-CounterStrikeSourceLaunchArgs, Test-CounterStrikeSourceServerConfig
+function Start-CounterStrikeSourceServer {
+    <#
+    .SYNOPSIS
+        Starts the CounterStrikeSource server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Start-GSMServer with this plugin's
+        FolderName, Executable, and launch-argument function name. See
+        Core/ProcessManager.psm1 for the actual Scheduled Task lifecycle.
+    .EXAMPLE
+        Start-CounterStrikeSourceServer
+    .NOTES
+        Throws under the same conditions as Start-GSMServer: missing
+        config, missing executable, or Scheduled Task registration/start
+        failure.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Start-GSMServer -FolderName 'CounterStrikeSource' -Executable 'srcds.exe' -GetLaunchArgsFunctionName 'Get-CounterStrikeSourceLaunchArgs'
+}
+
+function Stop-CounterStrikeSourceServer {
+    <#
+    .SYNOPSIS
+        Stops the CounterStrikeSource server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Stop-GSMServer with this plugin's
+        FolderName.
+    .EXAMPLE
+        Stop-CounterStrikeSourceServer
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Stop-GSMServer -FolderName 'CounterStrikeSource'
+}
+
+function Restart-CounterStrikeSourceServer {
+    <#
+    .SYNOPSIS
+        Restarts the CounterStrikeSource server via Core/ProcessManager.psm1.
+    .DESCRIPTION
+        Thin wrapper: delegates to Restart-GSMServer with this plugin's
+        FolderName, Executable, and launch-argument function name.
+    .EXAMPLE
+        Restart-CounterStrikeSourceServer
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return Restart-GSMServer -FolderName 'CounterStrikeSource' -Executable 'srcds.exe' -GetLaunchArgsFunctionName 'Get-CounterStrikeSourceLaunchArgs'
+}
+
+function Get-CounterStrikeSourceServerStatus {
+    <#
+    .SYNOPSIS
+        Reports the CounterStrikeSource server's running status.
+    .DESCRIPTION
+        Thin wrapper: delegates to Get-GSMServerStatus with this plugin's
+        FolderName. Returns 'Running', 'Stopped', or 'Crashed'.
+    .EXAMPLE
+        Get-CounterStrikeSourceServerStatus
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    return Get-GSMServerStatus -FolderName 'CounterStrikeSource'
+}
+
+function New-CounterStrikeSourceConfig {
+    <#
+    .SYNOPSIS
+        Interactively creates or updates CounterStrikeSource's server config.
+    .DESCRIPTION
+        Thin wrapper: delegates to New-GSMServerConfig with this plugin's
+        FolderName, GameName, AppID, DefaultPort, and its own Maps and
+        ServerConfig function names. Neither -RequiresMode nor
+        -SupportsWorkshop is passed: this plugin has no separate Mode
+        config field (objective type is embedded in the map name prefix -
+        see the header comment on Test-CounterStrikeSourceServerConfig) and
+        does not support Steam Workshop (Plugin.json's SupportsWorkshop is
+        false).
+    .EXAMPLE
+        New-CounterStrikeSourceConfig
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    return New-GSMServerConfig -FolderName 'CounterStrikeSource' -GameName 'CounterStrike' -AppID '232330' -DefaultPort 27015 `
+        -GetMapsFunctionName 'Get-CounterStrikeSourceMaps' -TestServerConfigFunctionName 'Test-CounterStrikeSourceServerConfig'
+}
+
+Export-ModuleMember -Function Get-CounterStrikeSourceLaunchArgs, Test-CounterStrikeSourceServerConfig, Start-CounterStrikeSourceServer, Stop-CounterStrikeSourceServer, Restart-CounterStrikeSourceServer, Get-CounterStrikeSourceServerStatus, New-CounterStrikeSourceConfig
