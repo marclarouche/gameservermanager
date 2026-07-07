@@ -94,6 +94,53 @@ plugins silently colliding.
   need fixing: `PSUseShouldProcessForStateChangingFunctions`,
   `PSUseSingularNouns`. Everything else must be genuinely fixed.
 
+## Next task (do this first, before Phase 2): fix Menu.psm1's GameName dispatch bug
+
+Found while walking Marc through how to use the tool - not caught by any
+test because no test exercises the interactive menu with two plugins
+sharing a `GameName`.
+
+**The bug:** `Core/Menu.psm1`'s `Invoke-GSMAction` looks up the target
+plugin by `Plugin.json`'s `GameName` field:
+```powershell
+$plugin = $plugins | Where-Object { $_.GameName -eq $GameName } | Select-Object -First 1
+```
+L4D and L4D2 both have `GameName: "Left4Dead"` (only `Version` differs).
+`Select-Object -First 1` silently picks whichever one `Find-GSMPlugins`
+happens to return first (alphabetical folder scan order - L4D). Worse,
+`Show-MainMenu`'s game-selection prompt builds its choice list via
+`$plugins.GameName | Select-Object -Unique`, so "Left4Dead" appears in the
+menu exactly once - **L4D2 is currently unreachable through the interactive
+menu or `GSM.ps1 -GameName ... -Action ...` at all.**
+
+This is the exact same GameName-vs-FolderName collision that was already
+fixed for config/status/backup file naming and Scheduled Task names earlier
+this session - it just wasn't caught in the dispatch/lookup path itself.
+
+**The fix:** `Invoke-GSMAction` and `GSM.ps1`/`Show-MainMenu` need to key
+off `FolderName`, not `GameName`. Likely shape:
+- Change `Invoke-GSMAction`'s parameter (or add one) to take `-FolderName`
+  instead of/alongside `-GameName`, and look up the plugin via
+  `Where-Object { $_.FolderName -eq $FolderName }`.
+- `Show-MainMenu`'s game list needs to display something that disambiguates
+  L4D from L4D2 (e.g. show `FolderName` instead of `GameName`, or show both:
+  `"$($plugin.GameName) ($($plugin.FolderName))"`).
+- `GSM.ps1`'s `-GameName` parameter likely needs to become `-FolderName` (or
+  gain a `-FolderName` alternative) for the non-interactive path too - this
+  is a breaking change to the CLI contract, worth flagging to Marc explicitly
+  rather than silently deciding.
+- Update `Tests/Menu.Tests.ps1` and `Tests/PluginLoader.Tests.ps1` (if it
+  touches this) accordingly, and add a regression test with two fake plugins
+  sharing a `GameName` but different `FolderName`s, asserting both are
+  independently reachable - this is exactly the gap that let the bug ship.
+
+Workaround in the meantime (already given to Marc): bypass the menu and
+call the plugin's own FolderName-keyed functions directly, e.g.
+`Import-Module .\Plugins\L4D2\Install.psm1, .\Plugins\L4D2\Server.psm1
+-Force` then `Install-L4D2Server`, `New-L4D2Config`, `Start-L4D2Server`,
+`Get-L4D2ServerStatus`. Insurgency2014, TeamFortress2, and
+CounterStrikeSource are unaffected since each has a unique `GameName`.
+
 ## Next: Phase 2 - Server Management
 
 Not started. Per the PRD (`Docs/PRD.md` section 9), Phase 2 (~2,000 lines)
