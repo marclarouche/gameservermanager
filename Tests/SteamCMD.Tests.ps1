@@ -63,6 +63,12 @@ Describe 'Core/SteamCMD.psm1' {
             Mock -ModuleName SteamCMD -CommandName Invoke-WebRequest -MockWith { }
             Mock -ModuleName SteamCMD -CommandName Expand-Archive -MockWith {
                 param($Path, $DestinationPath, [switch]$Force)
+                # $Path and $Force are unused in this fake body, but the
+                # param block must mirror the real Expand-Archive cmdlet's
+                # parameters for Pester's mock to bind call-site arguments
+                # correctly - see the same pattern in ProcessManager.Tests.ps1.
+                $null = $Path
+                $null = $Force
                 New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
                 Set-Content -Path (Join-Path $DestinationPath 'steamcmd.exe') -Value $script:FakeSteamCmdContent -NoNewline
             }
@@ -84,6 +90,12 @@ Describe 'Core/SteamCMD.psm1' {
             Mock -ModuleName SteamCMD -CommandName Invoke-WebRequest -MockWith { }
             Mock -ModuleName SteamCMD -CommandName Expand-Archive -MockWith {
                 param($Path, $DestinationPath, [switch]$Force)
+                # $Path and $Force are unused in this fake body, but the
+                # param block must mirror the real Expand-Archive cmdlet's
+                # parameters for Pester's mock to bind call-site arguments
+                # correctly - see the same pattern in ProcessManager.Tests.ps1.
+                $null = $Path
+                $null = $Force
                 New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
                 Set-Content -Path (Join-Path $DestinationPath 'steamcmd.exe') -Value $script:FakeSteamCmdContent -NoNewline
             }
