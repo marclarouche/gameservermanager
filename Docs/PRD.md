@@ -39,8 +39,11 @@ sixth game later is still just a new folder, no core changes.
 - Web dashboard (Phase 4)
 - RCON console, Discord notifications, Workshop support (Phase 4)
 - Any game plugin beyond the five listed in section 3
-- Running servers as a Windows service (that's `Core/Service.psm1`, Phase 2);
-  Phase 1 only provisions the account, it doesn't wire it into service start/stop
+- Running servers as a genuine Windows Service (that's `Core/Service.psm1`,
+  Phase 2, via a service-wrapper tool); Phase 1 wires the ServiceAccount into
+  Scheduled Task-based start/stop instead (`Core/ProcessManager.psm1`), since
+  dedicated-server executables don't implement the Service Control Manager
+  protocol
 - Multi-server orchestration (each instance manages its own servers)
 
 ## 5. Users
@@ -68,7 +71,9 @@ GameServerManager/
 │   ├── PluginLoader.psm1    # Phase 1 - discover/validate Plugin.json, load modules
 │   ├── Utilities.psm1       # Phase 1 - shared helpers (paths, hashing, prompts)
 │   ├── ServiceAccount.psm1  # Phase 1 - least-privilege local account provisioning
-│   ├── Service.psm1         # Phase 2 - start/stop/restart/status, runs as ServiceAccount
+│   ├── ProcessManager.psm1  # Phase 1 - Scheduled Task-based start/stop/restart/status
+│   ├── ConfigEditor.psm1    # Phase 1 - generic interactive config editor
+│   ├── Service.psm1         # Phase 2 - wraps servers as genuine Windows Services (NSSM-style)
 │   ├── Scheduler.psm1       # Phase 3 - scheduled restarts/updates
 │   ├── Backup.psm1          # Phase 3 - backup/restore
 │   ├── Firewall.psm1        # Phase 3 - Windows Firewall rule management
@@ -79,7 +84,9 @@ GameServerManager/
 │   ├── Insurgency2014/
 │   │   ├── Plugin.json      # AppID 237410, port 27015, Workshop + RCON
 │   │   ├── Install.psm1     # Phase 1 - SteamCMD install call for this game
-│   │   ├── Server.psm1      # Phase 1/2 - launch params, start/stop hooks
+│   │   ├── Server.psm1      # Phase 1 - launch params, thin Start/Stop/Restart/
+│   │   │                    #   Status/Configure wrappers around
+│   │   │                    #   Core/ProcessManager.psm1 and Core/ConfigEditor.psm1
 │   │   ├── Maps.psm1        # Phase 1 - map list, validation
 │   │   └── Modes.psm1       # Phase 1 - game mode list, validation
 │   ├── TeamFortress2/       # AppID 232250, port 27015, Workshop + RCON
@@ -201,3 +208,14 @@ least-privilege account, with no manual file editing.
   just the initial scaffold. The §12 table description was written early
   and undersold what Phase 1 actually delivered; this entry documents the
   correction so later phase versioning isn't read against a stale baseline.
+- PRD items 11 (start/stop/restart/status) and 12 (interactive config
+  editor) are now implemented across all five plugins via
+  `Core/ProcessManager.psm1` (Scheduled Task-based, since dedicated-server
+  executables aren't Service Control Manager-aware) and
+  `Core/ConfigEditor.psm1`. Section 8's exit criteria is now genuinely met,
+  not just the framework/plugin-shape milestone the v0.1.0 tag originally
+  covered.
+- The CHANGELOG's earlier "known gap: ServiceAccount secedit/Set-Acl calls
+  are not unit tested" note was inaccurate and has been removed:
+  `Tests/ServiceAccount.Tests.ps1` has had mocked coverage of those calls
+  since before that note was written.
