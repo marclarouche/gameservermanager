@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased] - 2026-07-08
+
+### Fixed
+- `Core/Menu.psm1`'s `Invoke-GSMAction` dispatched by Plugin.json's `GameName`
+  only, so plugins sharing a `GameName` (L4D and L4D2 both report
+  `Left4Dead`) collided: `Select-Object -First 1` silently picked L4D,
+  making L4D2 unreachable via the interactive menu or `GSM.ps1 -GameName`.
+  `Invoke-GSMAction` now accepts an optional `-FolderName` (always
+  unambiguous) alongside `-GameName`; a `-GameName` that matches more than
+  one plugin now returns `$false` with a logged error instead of silently
+  picking one. `Show-MainMenu`'s game list now displays and selects by
+  `FolderName`. `GSM.ps1` gained a `-FolderName` parameter as a non-breaking
+  alternative to `-GameName` for the non-interactive path.
+
 ## [0.1.0-alpha] - 2026-07-07
 
 ### Status

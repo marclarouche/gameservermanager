@@ -1,3 +1,6 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars', '', Justification = 'GSMTestInvokedFunction is a cross-module-boundary test probe: fake plugin functions are loaded into Global scope by Import-GSMPlugin - a separate module boundary from this test file - so only a global variable can carry the "which function ran" signal back to the assertion.')]
+param()
+
 BeforeAll {
     Import-Module "$PSScriptRoot/../Core/Menu.psm1" -Force
     $script:RealPluginsDirectory = (Resolve-Path "$PSScriptRoot/../Plugins").Path
@@ -133,6 +136,106 @@ Export-ModuleMember -Function Get-GSMTestFakeGameServerStatus
                 $Level -eq 'Info' -and $Message -match 'Running'
             }
         }
+
+        It 'dispatches by -FolderName instead of -GameName' {
+            New-Item -ItemType Directory -Path $script:FakePluginFolder -Force | Out-Null
+
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Plugin.json') -Value @'
+{"GameName":"GSMTestFakeGame","Version":"1","AppID":"999999","Engine":"Source","Executable":"fake.exe","DefaultPort":27015,"SupportsWorkshop":false,"SupportsRCON":false}
+'@
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Install.psm1') -Value @'
+Set-StrictMode -Version Latest
+function Install-GSMTestFakeGameServer {
+    $global:GSMTestInvokedFunction = 'Install-GSMTestFakeGameServer'
+}
+Export-ModuleMember -Function Install-GSMTestFakeGameServer
+'@
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Server.psm1') -Value 'Set-StrictMode -Version Latest'
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Maps.psm1') -Value 'Set-StrictMode -Version Latest'
+            Set-Content -Path (Join-Path $script:FakePluginFolder 'Modes.psm1') -Value 'Set-StrictMode -Version Latest'
+
+            $global:GSMTestInvokedFunction = $null
+            $result = Invoke-GSMAction -FolderName 'GSMTestFakeGame' -Action Install
+
+            $result | Should -Be $true
+            $global:GSMTestInvokedFunction | Should -Be 'Install-GSMTestFakeGameServer'
+        }
+
+        It 'returns $false and logs an error when neither -GameName nor -FolderName is supplied' {
+            Mock -ModuleName Menu -CommandName Write-GSMLog -MockWith { }
+
+            $result = Invoke-GSMAction -Action Install
+
+            $result | Should -Be $false
+            Should -Invoke -ModuleName Menu -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Error' }
+        }
+
+        It 'returns $false and logs an error when both -GameName and -FolderName are supplied' {
+            Mock -ModuleName Menu -CommandName Write-GSMLog -MockWith { }
+
+            $result = Invoke-GSMAction -GameName 'GSMTestFakeGame' -FolderName 'GSMTestFakeGame' -Action Install
+
+            $result | Should -Be $false
+            Should -Invoke -ModuleName Menu -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Error' }
+        }
+    }
+
+    Context 'Invoke-GSMAction GameName/FolderName disambiguation' {
+        BeforeEach {
+            $script:FakeFolderA = Join-Path $script:RealPluginsDirectory 'GSMTestFakeGameA'
+            $script:FakeFolderB = Join-Path $script:RealPluginsDirectory 'GSMTestFakeGameB'
+
+            foreach ($folder in @($script:FakeFolderA, $script:FakeFolderB)) {
+                New-Item -ItemType Directory -Path $folder -Force | Out-Null
+                Set-Content -Path (Join-Path $folder 'Plugin.json') -Value @'
+{"GameName":"GSMTestSharedGameName","Version":"1","AppID":"999999","Engine":"Source","Executable":"fake.exe","DefaultPort":27015,"SupportsWorkshop":false,"SupportsRCON":false}
+'@
+                $folderTag = Split-Path -Path $folder -Leaf
+                Set-Content -Path (Join-Path $folder 'Install.psm1') -Value @"
+Set-StrictMode -Version Latest
+function Install-${folderTag}Server {
+    `$global:GSMTestInvokedFunction = 'Install-${folderTag}Server'
+}
+Export-ModuleMember -Function Install-${folderTag}Server
+"@
+                Set-Content -Path (Join-Path $folder 'Server.psm1') -Value 'Set-StrictMode -Version Latest'
+                Set-Content -Path (Join-Path $folder 'Maps.psm1') -Value 'Set-StrictMode -Version Latest'
+                Set-Content -Path (Join-Path $folder 'Modes.psm1') -Value 'Set-StrictMode -Version Latest'
+            }
+        }
+
+        AfterEach {
+            foreach ($folder in @($script:FakeFolderA, $script:FakeFolderB)) {
+                if (Test-Path -Path $folder) {
+                    Remove-Item -Path $folder -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            Remove-Module -Name 'Install', 'Server', 'Maps', 'Modes' -Force -ErrorAction SilentlyContinue
+        }
+
+        It 'returns $false and logs an error when -GameName matches two plugins with different FolderNames' {
+            Mock -ModuleName Menu -CommandName Write-GSMLog -MockWith { }
+
+            $result = Invoke-GSMAction -GameName 'GSMTestSharedGameName' -Action Install
+
+            $result | Should -Be $false
+            Should -Invoke -ModuleName Menu -CommandName Write-GSMLog -Times 1 -ParameterFilter {
+                $Level -eq 'Error' -and $Message -match 'multiple plugins'
+            }
+        }
+
+        It 'reaches both plugins independently via -FolderName despite a shared GameName' {
+            $global:GSMTestInvokedFunction = $null
+            $resultA = Invoke-GSMAction -FolderName 'GSMTestFakeGameA' -Action Install
+            $resultA | Should -Be $true
+            $global:GSMTestInvokedFunction | Should -Be 'Install-GSMTestFakeGameAServer'
+
+            $global:GSMTestInvokedFunction = $null
+            $resultB = Invoke-GSMAction -FolderName 'GSMTestFakeGameB' -Action Install
+            $resultB | Should -Be $true
+            $global:GSMTestInvokedFunction | Should -Be 'Install-GSMTestFakeGameBServer'
+        }
     }
 }
 
@@ -157,9 +260,10 @@ Set-StrictMode -Version Latest
 function Invoke-GSMAction {
     param(
         [string]$GameName,
+        [string]$FolderName,
         [string]$Action
     )
-    return ($GameName -eq 'WillSucceed')
+    return ($GameName -eq 'WillSucceed' -or $FolderName -eq 'WillSucceed')
 }
 
 function Show-MainMenu {
@@ -184,6 +288,16 @@ Export-ModuleMember -Function Invoke-GSMAction, Show-MainMenu
 
     It 'exits 1 when only -GameName is supplied without -Action' {
         & pwsh -NoProfile -File $script:FakeGsmScriptPath -GameName 'WillSucceed' 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 1
+    }
+
+    It 'exits 0 when -FolderName succeeds' {
+        & pwsh -NoProfile -File $script:FakeGsmScriptPath -FolderName 'WillSucceed' -Action 'Install' | Out-Null
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It 'exits 1 when both -GameName and -FolderName are supplied' {
+        & pwsh -NoProfile -File $script:FakeGsmScriptPath -GameName 'WillSucceed' -FolderName 'WillSucceed' -Action 'Install' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 1
     }
 }
