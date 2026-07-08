@@ -1,6 +1,6 @@
 # GameServer Manager (GSM) - Product Requirements Document
 
-**Version:** 0.2.0-alpha (Phase 2)
+**Version:** 0.3.0-alpha (Phase 3)
 **Platform:** Windows 11, PowerShell 7+
 **License:** MIT
 **Author:** Marc Larouche
@@ -194,11 +194,38 @@ provides a single update lifecycle that never restarts a server into a
 possibly broken install. 391/391 tests passing, PSScriptAnalyzer clean
 except the two pre-accepted categories (section 13).
 
+### Phase 3 (complete)
+
+1. `Core/Firewall.psm1` - `Add-GSMFirewallRule`, `Remove-GSMFirewallRule`,
+   `Get-GSMFirewallRuleStatus`, on the built-in NetSecurity module
+2. `Config/<FolderName>.json` gained optional `RestartTime` and
+   `UpdateCheckTime` fields (default `'04:00'`/`'04:15'`)
+3. `Core/Scheduler.psm1` - `Register-GSMScheduledMaintenance`,
+   `Unregister-GSMScheduledMaintenance`, `Get-GSMScheduledMaintenanceStatus`;
+   nightly restart via `Service.psm1`, nightly update check via
+   `Update.psm1`, reusing `ProcessManager.psm1`'s Scheduled Task pattern
+4. `Config/<FolderName>.json` gained an optional `BackupRetentionCount`
+   field (default 5)
+5. `Core/Backup.psm1` - `New-GSMBackup`, `Restore-GSMBackup`,
+   `Get-GSMBackupList`, on the built-in Compress-Archive/Expand-Archive
+   cmdlets; config/state only, fail-closed restore with a pre-restore
+   safety backup
+6. `Core/Reports.psm1` - `New-GSMServerHealthReport`, a single
+   PowerShell-generated `Reports/ServerHealth-<timestamp>.html`,
+   cross-referencing `Firewall.psm1` and `Backup.psm1`
+7. This documentation update (CHANGELOG.md, PRD.md)
+
+**Exit criteria:** Every server instance can have its game port firewalled,
+nightly restart/update-check maintenance scheduled, its config/state
+backed up and restored with a validation gate, and a single health report
+generated covering plugins, ports, firewall rules, backups, and host
+system status. All four modules are Core-level and instance-generic - no
+plugin-specific code changed (PRD section 13 decisions log).
+
 ## 9. Later phases (reference only, not built yet)
 
 | Phase | Focus | Est. lines | Adds |
 |---|---|---|---|
-| 3 | Administration | ~2,000 | Firewall, Scheduler, Backup, Reports |
 | 4 | Professional Features | ~3,000+ | Web dashboard, RCON, Discord, Workshop, plugin marketplace |
 
 ## 10. Security requirements (all phases)
@@ -226,7 +253,7 @@ except the two pre-accepted categories (section 13).
 |---|---|
 | v0.1.0 | Phase 1 complete: full framework, all five game plugins, tests passing |
 | v0.2.0 | Phase 2 complete: NSSM-backed `Service.psm1`, crash recovery, `Update.psm1` |
-| v0.3.0 | Administration |
+| v0.3.0 | Phase 3 complete: `Firewall.psm1`, `Scheduler.psm1`, `Backup.psm1`, `Reports.psm1` |
 | v0.4.0 | Monitoring |
 | v1.0.0 | Stable release |
 
@@ -261,3 +288,24 @@ except the two pre-accepted categories (section 13).
   `Update-GSMServer` deliberately leaves a server stopped, not restarted,
   when a SteamCMD update fails - restarting into a possibly broken install
   was judged worse than a clear, visible failure.
+- Phase 3 (`Core/Firewall.psm1`, `Core/Scheduler.psm1`, `Core/Backup.psm1`,
+  `Core/Reports.psm1`) is complete. GSM has no multi-instance-per-plugin
+  concept (section 4's "Multi-server orchestration" non-goal) - every
+  plugin folder is exactly one server instance - so the original
+  `<PluginFolderName>-<InstanceName>-...` naming convention for firewall
+  rules and backup files collapses to just `<FolderName>-...`;
+  `Firewall.psm1`'s rule names add a `<Protocol>` suffix instead, since
+  `New-NetFirewallRule`'s `-Name` must be unique per protocol. The stale
+  "Windows Service" mention under Phase 3's scope was already removed from
+  section 9 during the Phase 2 closeout, not this one - there was nothing
+  left to drop here. `Scheduler.psm1` derives each plugin's
+  `GetLaunchArgsFunctionName` from the `Get-<FolderName>LaunchArgs` naming
+  convention already followed by all five plugins, rather than adding a
+  new stored field - confirmed against all five before relying on it.
+  `Backup.psm1` snapshots and restores only each instance's own key in the
+  shared `Config/CustomMaps.json`, never the whole file, so restoring one
+  instance can't roll back another's custom maps. Pester tests were
+  written for all four modules and the new `Config.psm1` schema fields but
+  not executed as part of this work: the sandbox this was built in has no
+  PowerShell installed. Test counts and any PSScriptAnalyzer findings are
+  pending Marc's local run.

@@ -1,74 +1,114 @@
-# GSM Phase 2 - Session Status
+# GSM Phase 3 - Session Status
 
 Last updated: 2026-07-08
 
-## Where things stand: Phase 2 is fully complete
+## Where things stand: Phase 3 is fully complete
 
-All 6 Phase 2 deliverables are shipped, tested, and ready to commit/push.
-Nothing is left pending from Phase 2's scope.
+All 4 Phase 3 deliverables are shipped, tested, and ready to commit/push.
+Nothing is left pending from Phase 3's scope.
 
 | Deliverable | Module |
 |---|---|
-| NSSM binary bundling (download/hash-verify/extract) | `Core/NSSM.psm1` |
-| ServiceAccount rights doc update (folded into Service.psm1 commit) | `Core/ServiceAccount.psm1` |
-| NSSM-backed Start/Stop/Restart/Status + crash recovery, drop-in for `ProcessManager.psm1` | `Core/Service.psm1` |
-| All five plugins repointed to `Core/Service.psm1` | `Plugins/*/Server.psm1` |
-| Stop/SteamCMD update/verify/restart lifecycle | `Core/Update.psm1` |
-| CHANGELOG.md / PRD.md Phase 2 close-out | `CHANGELOG.md`, `Docs/PRD.md` |
+| Windows Firewall rule management (idempotent add/remove/status) | `Core/Firewall.psm1` |
+| Nightly restart + update-check Scheduled Task maintenance | `Core/Scheduler.psm1` |
+| Config/state backup and restore, fail-closed with retention | `Core/Backup.psm1` |
+| Static HTML server health report | `Core/Reports.psm1` |
+| `RestartTime`/`UpdateCheckTime`/`BackupRetentionCount` schema fields | `Core/Config.psm1` |
+| CHANGELOG.md / PRD.md Phase 3 close-out | `CHANGELOG.md`, `Docs/PRD.md` |
 
-Test count: **391/391 passing**, run via `Tests/Run-AllTests.ps1`.
+Test count: **457/457 passing**, run via `Tests/Run-AllTests.ps1`.
 PSScriptAnalyzer is clean project-wide except the two pre-accepted
 categories: `PSUseShouldProcessForStateChangingFunctions` and
 `PSUseSingularNouns`.
 
 ## What got built this phase (in order)
 
-1. **`Core/NSSM.psm1`** (new) - mirrors `Core/SteamCMD.psm1`'s
-   download/hash-verify/extract pattern. NSSM's zip nests `win32`/`win64`
-   builds under a version folder, so install extracts to a temp dir, locates
-   `win64/nssm.exe` by path suffix, hash-verifies it, then copies only that
-   file to `Tools/NSSM/nssm.exe`. Pinned URL/hash in `Config/NSSM.json`.
-2. **`ServiceAccount.psm1` doc update** - the account already held both
-   `SeServiceLogonRight` and `SeBatchLogonRight` since Phase 1; only the
-   doc comments describing their purpose changed. Folded into the
-   `Service.psm1` commit rather than shipped separately, per Marc's call.
-3. **`Core/Service.psm1`** (new) - NSSM-backed `Start-GSMServer`,
-   `Stop-GSMServer`, `Restart-GSMServer`, `Get-GSMServerStatus`,
-   `Install-GSMServerService`, `Uninstall-GSMServerService`,
-   `Set-GSMServiceCrashRecovery` (NSSM `AppExit=Restart`, 5s restart delay,
-   10s throttle - well above NSSM's stock 1500ms since game servers take
-   longer to bind ports/load maps). Same exported function
-   names/parameters as `Core/ProcessManager.psm1`, so it's a drop-in
-   replacement. `Config/<FolderName>.json` gained an optional
-   `ProcessManager` field (`'NSSM'` default, or `'ScheduledTask'` to keep
-   using the Phase 1 backend per server).
-4. **Repointed all five plugins' `Server.psm1`** from
-   `Core/ProcessManager.psm1` to `Core/Service.psm1` (built via five
-   parallel subagents, then independently re-verified file-by-file).
-   Bundled as one commit rather than five, since the diff was mechanically
-   identical across all five plugins.
-5. **`Core/Update.psm1`** (new) - `Update-GSMServer`, thin orchestration
-   only (no process-management or SteamCMD logic of its own). Composes
-   `Stop-GSMServer` -> `Update-SteamApp` -> `Start-GSMServer`. On update
-   failure, the server is left stopped with a clear error rather than
-   restarted into a possibly broken install.
-6. **Documentation close-out** - `CHANGELOG.md` gained a `[0.2.0-alpha]`
-   entry, `Docs/PRD.md` section 8 restructured into Phase 1/Phase 2
-   subsections with Phase 2's build order and exit criteria, section 9's
-   "later phases" table dropped the now-complete Phase 2 row (and the
-   stale "Windows Service" mention under Phase 3, which Phase 2 already
-   delivered), section 12's versioning table marks v0.2.0 complete, and a
-   new decisions-log entry documents the drop-in-replacement design and the
-   leave-stopped-on-failure choice. `VERSION` bumped to `0.2.0-alpha`.
+1. **`Core/Firewall.psm1`** (new) - `Add-GSMFirewallRule`,
+   `Remove-GSMFirewallRule`, `Get-GSMFirewallRuleStatus`, on the built-in
+   NetSecurity module. Reads `Plugin.json`'s `DefaultPort` and an optional
+   `Protocol` field (defaults to both TCP and UDP - none of the five
+   plugins set it). Rule identity is `GSM-<FolderName>-<Port>-<Protocol>`:
+   the task's original `<PluginFolderName>-<InstanceName>-<Port>` naming
+   collapsed (GSM has no multi-instance-per-plugin concept) and gained a
+   `<Protocol>` suffix (`New-NetFirewallRule` needs a unique name per
+   protocol). `Get-GSMFirewallRuleStatus` parses protocol/port back out of
+   the rule's own name rather than querying `Get-NetFirewallPortFilter`,
+   which needs a genuine CimInstance and can't be unit-tested with fake
+   rule objects.
+2. **`Config/<FolderName>.json` gained `RestartTime`/`UpdateCheckTime`**
+   (optional, `HH:mm`, default `'04:00'`/`'04:15'`) and later
+   **`BackupRetentionCount`** (optional positive integer, default 5), both
+   validated only when present in `Core/Config.psm1`'s `Test-GSMConfig`.
+3. **`Core/Scheduler.psm1`** (new) - `Register-GSMScheduledMaintenance`,
+   `Unregister-GSMScheduledMaintenance`, `Get-GSMScheduledMaintenanceStatus`.
+   Reuses `Core/ProcessManager.psm1`'s Scheduled Task cmdlet/credential
+   pattern (that module doesn't export it as a helper, so this mirrors the
+   cmdlet sequence rather than importing one). Each trigger runs in a
+   fresh `pwsh.exe` via a base64 `-EncodedCommand` (avoids nested-quoting
+   hazards), importing the plugin and calling `Restart-GSMServer` or
+   `Update-GSMServer`. `GetLaunchArgsFunctionName` is derived from the
+   `Get-<FolderName>LaunchArgs` convention already followed by all five
+   plugins - confirmed against all five before relying on it, not stored
+   anywhere new.
+4. **`Core/Backup.psm1`** (new) - `New-GSMBackup`, `Restore-GSMBackup`,
+   `Get-GSMBackupList`, on `Compress-Archive`/`Expand-Archive`. Backs up
+   `Config/<FolderName>.json`, any `.cfg` overrides under
+   `Servers/<FolderName>` (none exist yet; scan is recursive and
+   forward-compatible), and only this instance's own key from the shared
+   `Config/CustomMaps.json` - never the whole shared file, since that
+   would let restoring one instance clobber every other instance's custom
+   maps. `Restore-GSMBackup` takes a safety backup first (skipped with a
+   warning if there's no live config to protect yet), validates via
+   `Get-GSMConfig` before applying anything, and fails closed on an
+   invalid restored config.
+5. **`Core/Reports.psm1`** (new) - `New-GSMServerHealthReport`, a single
+   PowerShell-generated `Reports/ServerHealth-<timestamp>.html`. Covers
+   installed plugins, SteamCMD status, per-instance config (RCON password
+   redacted)/custom maps/firewall rules/backup status, and host
+   Windows/CPU/memory/disk info. States plainly that update history isn't
+   tracked as structured data anywhere in Phase 1-2 rather than fabricating
+   one. Data-gathering and HTML rendering are separate internal functions.
+6. **Wire-through check** - confirmed none of the above needed any
+   plugin-specific code changes; all four modules are Core-level and
+   instance-generic.
+7. **Documentation close-out** - `CHANGELOG.md` gained a `[0.3.0-alpha]`
+   entry, `Docs/PRD.md` section 8 gained a Phase 3 subsection, section 9's
+   "later phases" table dropped the now-complete Phase 3 row, section 12
+   marks v0.3.0 complete, and a new decisions-log entry documents the
+   InstanceName-collapse and Protocol-suffix naming calls. `VERSION`
+   bumped to `0.3.0-alpha`.
+
+Two rounds of local test fixes after the first `Run-AllTests.ps1` pass (4
+failures) and first `Invoke-ScriptAnalyzer` pass (3 findings):
+- `@(Get-NetFirewallRule ...)` / `@(Get-ChildItem ... | Measure-Object -Sum).Sum`
+  wrapping a `$null`/no-output result into a one-element array or throwing
+  on property access - `Set-StrictMode -Version Latest` catches both.
+  Fixed with `| Where-Object { $_ }` before wrapping, and a `.Count -gt 0`
+  guard before calling `Measure-Object`.
+- `PSUseOutputTypeCorrectly` on `Get-GSMBackupList`/
+  `Get-GSMFirewallProtocolList` - returning a piped/wrapped `@(...)`
+  result doesn't type-match a declared `[psobject[]]`/`[string[]]`
+  `OutputType` as cleanly as building a typed `List<T>` and calling
+  `.ToArray()` directly (the pattern `Find-GSMPlugins` already used).
+- `PSAvoidUsingPlainTextForPassword` on `Scheduler.psm1`'s internal
+  `-PlainPassword` parameter - the rule flags password-like *parameters*
+  regardless of purpose. Removed the parameter; the plaintext is now
+  extracted from `-Credential` inside the one function that needs it and
+  dropped immediately after.
 
 ## Key naming convention (re-confirm if it comes up again)
 
 Everything is keyed by the plugin's **folder name**, never `Plugin.json`'s
 `GameName` field: `L4D` and `L4D2` both have `GameName: "Left4Dead"`, so
 `Config/<FolderName>.json`, the NSSM service name `GSM-<FolderName>`
-(`Core/Service.psm1`), and the Scheduled Task name `GSM-<FolderName>`
-(`Core/ProcessManager.psm1`) all use the folder name specifically to avoid
-the two plugins silently colliding.
+(`Core/Service.psm1`), Scheduled Task names `GSM-<FolderName>-*`
+(`Core/ProcessManager.psm1`, `Core/Scheduler.psm1`), firewall rule names
+`GSM-<FolderName>-*` (`Core/Firewall.psm1`), and backup file names
+`<FolderName>-*.zip` (`Core/Backup.psm1`) all use the folder name
+specifically to avoid the two plugins silently colliding. GSM has no
+multi-instance-per-plugin concept - one plugin folder is always exactly
+one server instance (confirmed with Marc during Phase 3; see PRD section
+13's Phase 3 decisions-log entry).
 
 ## Workflow reminders for continuing this
 
@@ -87,17 +127,22 @@ the two plugins silently colliding.
   `PSUseSingularNouns`. Everything else must be genuinely fixed.
 - When a test needs to see a command that lives inside another module's
   own private scope (e.g. a plugin's `Server.psm1` doing a nested
-  `Import-Module Core/Service.psm1 -Force` internally), a bare
-  `Get-Command`/`Get-Module` lookup from the test file's global scope won't
-  find it - use Pester's `InModuleScope <ModuleName> { ... }` instead, which
-  runs the check from inside that module's own session state.
+  `Import-Module Core/Service.psm1 -Force` internally, or any of Phase 3's
+  new internal/non-exported functions), a bare `Get-Command`/`Get-Module`
+  lookup from the test file's global scope won't find it - use Pester's
+  `InModuleScope <ModuleName> { ... }` instead, which runs the check from
+  inside that module's own session state.
+- Under `Set-StrictMode -Version Latest`, wrapping a cmdlet's result in
+  `@(...)` before checking `.Count` is not enough on its own when that
+  cmdlet can return `$null` for "no results" (e.g. `Get-NetFirewallRule`,
+  `Get-CimInstance`) - `@($null)` is a one-element array, not an empty
+  one. Pipe through `Where-Object { $_ }` first.
 
-## Next: Phase 3 - Administration
+## Next: Phase 4 - Professional Features
 
-Not started. Per the PRD (`Docs/PRD.md` section 9), Phase 3 (~2,000 lines)
-adds `Core/Firewall.psm1` (Windows Firewall rule management),
-`Core/Scheduler.psm1` (scheduled restarts/updates), `Core/Backup.psm1`
-(backup/restore), and `Core/Reports.psm1` (`ServerHealth.html` generation).
+Not started. Per the PRD (`Docs/PRD.md` section 9), Phase 4 (~3,000+
+lines) adds a web dashboard, RCON console, Discord notifications, Workshop
+support, and a plugin marketplace.
 
-No scope, design, or file-list decisions have been made for Phase 3 yet -
+No scope, design, or file-list decisions have been made for Phase 4 yet -
 that's the first thing to work out whenever this picks back up.

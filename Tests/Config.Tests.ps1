@@ -90,4 +90,46 @@ Describe 'Core/Config.psm1' {
         Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","ProcessManager":"Docker"}'
         { Get-GSMConfig -Path $path } | Should -Throw
     }
+
+    It 'loads a valid config that omits the optional RestartTime and UpdateCheckTime fields entirely' {
+        $path = Join-Path $script:TestDir 'no-scheduler-times.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410"}'
+        { Get-GSMConfig -Path $path } | Should -Not -Throw
+    }
+
+    It 'loads a valid config with well-formed RestartTime and UpdateCheckTime values' {
+        $path = Join-Path $script:TestDir 'scheduler-times.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","RestartTime":"04:00","UpdateCheckTime":"04:15"}'
+        { Get-GSMConfig -Path $path } | Should -Not -Throw
+    }
+
+    It 'rejects an invalid RestartTime value' {
+        $path = Join-Path $script:TestDir 'bad-restarttime.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","RestartTime":"25:00"}'
+        { Get-GSMConfig -Path $path } | Should -Throw
+    }
+
+    It 'rejects an invalid UpdateCheckTime value' {
+        $path = Join-Path $script:TestDir 'bad-updatechecktime.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","UpdateCheckTime":"4:15pm"}'
+        { Get-GSMConfig -Path $path } | Should -Throw
+    }
+
+    It 'loads a valid config that omits the optional BackupRetentionCount field entirely' {
+        $path = Join-Path $script:TestDir 'no-retention.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410"}'
+        { Get-GSMConfig -Path $path } | Should -Not -Throw
+    }
+
+    It 'loads a valid config with a positive integer BackupRetentionCount' {
+        $path = Join-Path $script:TestDir 'retention.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","BackupRetentionCount":10}'
+        { Get-GSMConfig -Path $path } | Should -Not -Throw
+    }
+
+    It 'rejects a BackupRetentionCount less than 1' {
+        $path = Join-Path $script:TestDir 'bad-retention.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","BackupRetentionCount":0}'
+        { Get-GSMConfig -Path $path } | Should -Throw
+    }
 }

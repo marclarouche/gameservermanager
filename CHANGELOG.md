@@ -2,6 +2,91 @@
 
 ## [Unreleased]
 
+## [0.3.0-alpha] - 2026-07-08
+
+### Status
+Phase 3 (Administration) complete. All 4 deliverables shipped:
+firewall rule management (`Core/Firewall.psm1`), scheduled nightly
+restart/update-check maintenance (`Core/Scheduler.psm1`), config/state
+backup and restore (`Core/Backup.psm1`), and a static HTML server health
+report (`Core/Reports.psm1`). All four are Core-level and instance-generic,
+driven entirely by existing `Plugin.json` metadata and instance config -
+no plugin-specific code changed (see the wire-through check in the PRD
+decisions log). 457/457 tests passing via `Tests/Run-AllTests.ps1`,
+PSScriptAnalyzer clean except the two pre-accepted
+`PSUseShouldProcessForStateChangingFunctions` and `PSUseSingularNouns`
+categories (see PRD decisions log). Two rounds of fixes were needed after
+the first local test run: a `@(...)`-wrapping-`$null` gotcha in
+`Firewall.psm1`/`Reports.psm1` under `Set-StrictMode -Version Latest`
+(`Get-NetFirewallRule`/`Measure-Object` returning `$null` on no matches
+wraps to a one-element array containing `$null`, not an empty array), and
+three genuine PSScriptAnalyzer findings (`PSUseOutputTypeCorrectly` in
+`Backup.psm1`/`Firewall.psm1`, `PSAvoidUsingPlainTextForPassword` in
+`Scheduler.psm1`).
+
+Next: Phase 4 - Professional Features (web dashboard, RCON, Discord,
+Workshop, plugin marketplace).
+
+### Added
+- `Core/Firewall.psm1`: `Add-GSMFirewallRule`, `Remove-GSMFirewallRule`,
+  `Get-GSMFirewallRuleStatus`, built on the built-in NetSecurity module
+  (`New-NetFirewallRule`/`Remove-NetFirewallRule`/`Get-NetFirewallRule`).
+  Reads the instance's `Plugin.json` `DefaultPort` and an optional
+  `Protocol` field (defaulting to both TCP and UDP - none of the five
+  Phase 1 plugins set `Protocol`, so all five get both). Rule identity is
+  `GSM-<FolderName>-<Port>-<Protocol>`: the task's original
+  `GSM-<PluginFolderName>-<InstanceName>-<Port>` naming collapses the
+  `InstanceName` segment (GSM has no multi-instance-per-plugin concept -
+  every plugin folder is one instance) and adds a `<Protocol>` suffix,
+  since `New-NetFirewallRule`'s `-Name` must be unique per protocol and one
+  port opened for both TCP and UDP is two rule objects, not one. All three
+  functions are idempotent.
+- `Core/Scheduler.psm1`: `Register-GSMScheduledMaintenance`,
+  `Unregister-GSMScheduledMaintenance`, `Get-GSMScheduledMaintenanceStatus`.
+  Registers two Scheduled Tasks per instance - nightly restart (default
+  04:00, calls `Core/Service.psm1`'s `Restart-GSMServer`) and nightly
+  update check (default 04:15, calls `Core/Update.psm1`'s
+  `Update-GSMServer`, staggered so it doesn't race the restart) - reusing
+  `Core/ProcessManager.psm1`'s Scheduled Task cmdlet/credential pattern.
+  Each trigger runs in a fresh `pwsh.exe` process via a base64
+  `-EncodedCommand`, importing the target plugin through
+  `Core/PluginLoader.psm1`. `GetLaunchArgsFunctionName` is derived from the
+  `Get-<FolderName>LaunchArgs` naming convention already followed by all
+  five plugins, not stored anywhere new.
+- `Config/<FolderName>.json` gained optional `RestartTime` and
+  `UpdateCheckTime` fields (24-hour `HH:mm`, defaulting to `'04:00'`/
+  `'04:15'` when absent) and an optional `BackupRetentionCount` field
+  (positive integer, defaulting to 5 when absent), all validated in
+  `Core/Config.psm1`'s `Test-GSMConfig` only when present.
+- `Core/Backup.psm1`: `New-GSMBackup`, `Restore-GSMBackup`,
+  `Get-GSMBackupList`, built on the built-in `Compress-Archive`/
+  `Expand-Archive` cmdlets. Backs up config/state only - `Config/<FolderName>.json`,
+  any per-server `.cfg` overrides under `Servers/<FolderName>` (none exist
+  yet, but the scan is recursive and forward-compatible), and this
+  instance's own slice of the shared `Config/CustomMaps.json` - never the
+  full game install. Output is `Backups/<FolderName>-<yyyyMMdd-HHmmss>.zip`,
+  pruned to the instance's `BackupRetentionCount` (default 5) after each
+  backup. `Restore-GSMBackup` takes a fresh safety backup of the live state
+  first (skipped with a warning if there's no live config yet), validates
+  the restored config via `Core/Config.psm1`'s `Get-GSMConfig` before
+  applying anything, and fails closed - an invalid restored config applies
+  nothing and leaves the safety backup in place. Restoring merges only this
+  instance's own key back into the shared `CustomMaps.json`, never
+  overwriting the whole file, so one instance's restore can't roll back
+  another instance's custom maps.
+- `Core/Reports.psm1`: `New-GSMServerHealthReport`, producing
+  `Reports/ServerHealth-<yyyyMMdd-HHmmss>.html` as a single
+  PowerShell-generated HTML string (no external templating library).
+  Covers installed plugins, SteamCMD install/pinned-verification status,
+  per-instance install/running status, config summary (`RCONPassword`
+  redacted), custom maps, firewall rule status (cross-referencing
+  `Core/Firewall.psm1`), backup status (cross-referencing
+  `Core/Backup.psm1`), and host Windows version/CPU/memory/disk usage.
+  States plainly that update history isn't tracked as structured data
+  anywhere in Phase 1-2, rather than fabricating a history section.
+  Data-gathering and HTML rendering are separate internal functions so
+  Pester can test the gathered data without diffing rendered HTML.
+
 ## [0.2.0-alpha] - 2026-07-08
 
 ### Status

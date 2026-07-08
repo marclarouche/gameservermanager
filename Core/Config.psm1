@@ -102,6 +102,36 @@ function Test-GSMConfig {
         throw "ProcessManager '$processManager' is invalid. Must be 'NSSM' or 'ScheduledTask'."
     }
 
+    # Optional (Phase 3): the daily HH:mm times Core/Scheduler.psm1
+    # registers its nightly restart and update-check triggers at.
+    # Validated only if present; a config that omits either field entirely
+    # is still valid - Core/Scheduler.psm1 treats a missing RestartTime as
+    # '04:00' and a missing UpdateCheckTime as '04:15', not this function.
+    # Those defaults are staggered 15 minutes apart on purpose, so a
+    # nightly update check doesn't race a nightly restart; nothing here
+    # enforces that gap for custom values, since the two fields are
+    # independently configurable per instance.
+    $restartTime = Get-GSMConfigPropertyValue -Config $Config -Name 'RestartTime'
+    if ($restartTime -and $restartTime -notmatch '^([01]\d|2[0-3]):[0-5]\d$') {
+        throw "RestartTime '$restartTime' is invalid. Must be a 24-hour HH:mm time (e.g. '04:00')."
+    }
+
+    $updateCheckTime = Get-GSMConfigPropertyValue -Config $Config -Name 'UpdateCheckTime'
+    if ($updateCheckTime -and $updateCheckTime -notmatch '^([01]\d|2[0-3]):[0-5]\d$') {
+        throw "UpdateCheckTime '$updateCheckTime' is invalid. Must be a 24-hour HH:mm time (e.g. '04:15')."
+    }
+
+    # Optional (Phase 3): how many of Core/Backup.psm1's backups to keep for
+    # this instance before pruning the oldest. Validated only if present; a
+    # config that omits it entirely is still valid - Core/Backup.psm1
+    # treats a missing value as 5, not this function.
+    $backupRetentionCount = Get-GSMConfigPropertyValue -Config $Config -Name 'BackupRetentionCount'
+    if ($null -ne $backupRetentionCount) {
+        if (($backupRetentionCount -isnot [int] -and $backupRetentionCount -isnot [long]) -or $backupRetentionCount -lt 1) {
+            throw "BackupRetentionCount '$backupRetentionCount' is invalid. Must be a positive integer."
+        }
+    }
+
     $topLevelKeys = [System.Collections.Generic.List[string]]::new()
     $keyMatches = [regex]::Matches($RawJson, '"([^"]+)"\s*:')
     foreach ($match in $keyMatches) {
