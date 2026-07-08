@@ -1,90 +1,82 @@
-# GSM Phase 1 - Session Status
+# GSM Phase 2 - Session Status
 
 Last updated: 2026-07-08
 
-## Where things stand: Phase 1 is fully complete
+## Where things stand: Phase 2 is fully complete
 
-All 13 PRD deliverables are shipped, tested, committed, and pushed. Nothing
-is left pending from Phase 1's scope.
+All 6 Phase 2 deliverables are shipped, tested, and ready to commit/push.
+Nothing is left pending from Phase 2's scope.
 
-Every one of the five plugins (Insurgency2014, TeamFortress2,
-CounterStrikeSource, L4D, L4D2) now implements all six lifecycle actions
-consistently:
-
-| Action | Implemented via |
+| Deliverable | Module |
 |---|---|
-| Install | Plugin's own `Install.psm1`, calling `Core/SteamCMD.psm1` |
-| Start / Stop / Restart / Status | Thin wrappers in each plugin's `Server.psm1`, delegating to `Core/ProcessManager.psm1` |
-| Configure | Thin wrapper `New-<Game>Config` in each plugin's `Server.psm1`, delegating to `Core/ConfigEditor.psm1` |
+| NSSM binary bundling (download/hash-verify/extract) | `Core/NSSM.psm1` |
+| ServiceAccount rights doc update (folded into Service.psm1 commit) | `Core/ServiceAccount.psm1` |
+| NSSM-backed Start/Stop/Restart/Status + crash recovery, drop-in for `ProcessManager.psm1` | `Core/Service.psm1` |
+| All five plugins repointed to `Core/Service.psm1` | `Plugins/*/Server.psm1` |
+| Stop/SteamCMD update/verify/restart lifecycle | `Core/Update.psm1` |
+| CHANGELOG.md / PRD.md Phase 2 close-out | `CHANGELOG.md`, `Docs/PRD.md` |
 
-Test count: **325/325 passing**, run via `Tests/Run-AllTests.ps1` (not a bare
-`Invoke-Pester -Path .\Tests\` - see below). PSScriptAnalyzer is clean
-project-wide except the two pre-accepted categories:
-`PSUseShouldProcessForStateChangingFunctions` and `PSUseSingularNouns`.
+Test count: **391/391 passing**, run via `Tests/Run-AllTests.ps1`.
+PSScriptAnalyzer is clean project-wide except the two pre-accepted
+categories: `PSUseShouldProcessForStateChangingFunctions` and
+`PSUseSingularNouns`.
 
-## What got built this session (in order)
+## What got built this phase (in order)
 
-1. **L4D2 plugin** (last of the five Phase 1 games) - Install/Server/Maps/
-   Modes/Config.template.json + four test files. Two judgment calls resolved
-   with Marc: exclude "The Last Stand" (community campaign, not Valve
-   in-house) from the map list, and exclude Realism Versus/Versus Survival
-   from the validated Mode enum (they're numbered Mutation slots
-   internally, not stable `mp_gamemode` values).
-2. **Documentation close-out #1** - CHANGELOG.md/PRD.md updated to mark
-   v0.1.0 as "Phase 1 complete" (at the time, that meant framework + five
-   plugins only - items 11/12 below didn't exist yet).
-3. **PRD items 11 & 12** (the actual big lift this session):
-   - `Core/ServiceAccount.psm1`: added `SeBatchLogonRight` (alongside the
-     existing `SeServiceLogonRight`), a `Servers` folder ACL entry, and
-     `Get-GSMServiceAccountCredential`.
-   - `Core/ProcessManager.psm1` (new): `Start-GSMServer`, `Stop-GSMServer`,
-     `Restart-GSMServer`, `Get-GSMServerStatus`. Launches servers via a
-     per-plugin **Scheduled Task** (not a native Windows Service) running as
-     the ServiceAccount - dedicated-server executables like `srcds.exe`
-     don't implement the Service Control Manager protocol, so registering
-     them as a real Windows Service would get them killed by Windows after
-     ~30 seconds. Native-service wrapping (via an NSSM-style tool) is still
-     Phase 2's `Core/Service.psm1`.
-   - `Core/ConfigEditor.psm1` (new): `New-GSMServerConfig`, a generic
-     interactive config editor taking Maps/Modes/validation function names
-     as parameters. Auto-backs up the existing config before overwriting.
-   - Five per-plugin `Server.psm1` files each got
-     `Start-<Game>Server`/`Stop-<Game>Server`/`Restart-<Game>Server`/
-     `Get-<Game>ServerStatus`/`New-<Game>Config` thin wrappers (built via
-     five parallel subagents, then independently re-verified file-by-file).
-   - `Menu.psm1`/`GSM.ps1` gained the `Restart` action.
-4. **Documentation close-out #2** - CHANGELOG.md/PRD.md updated again to
-   reflect that items 11/12 are genuinely done now, and to remove an
-   inaccurate "known gap" note about ServiceAccount's `secedit`/`Set-Acl`
-   calls being untested (they always had solid mocked coverage; the
-   original note was simply wrong).
-5. **`Tests/Run-AllTests.ps1`** (new, permanent fix) - runs every
-   `Tests/*.Tests.ps1` file in its own fresh `pwsh -NoProfile` child
-   process and aggregates pass/fail. This exists because a bare
-   `Invoke-Pester -Path .\Tests\` run shares one process across every test
-   file, and several plugins share bare module names (`Install`, `Server`,
-   `Maps`, `Modes`) - leftover global module state from one file's fixtures
-   was observed causing `Tests/Menu.Tests.ps1`'s dispatch tests to fail
-   only when run as part of the full suite, never in isolation. **Use this
-   script for the full suite from now on, not a bare `Invoke-Pester -Path
-   .\Tests\`.**
+1. **`Core/NSSM.psm1`** (new) - mirrors `Core/SteamCMD.psm1`'s
+   download/hash-verify/extract pattern. NSSM's zip nests `win32`/`win64`
+   builds under a version folder, so install extracts to a temp dir, locates
+   `win64/nssm.exe` by path suffix, hash-verifies it, then copies only that
+   file to `Tools/NSSM/nssm.exe`. Pinned URL/hash in `Config/NSSM.json`.
+2. **`ServiceAccount.psm1` doc update** - the account already held both
+   `SeServiceLogonRight` and `SeBatchLogonRight` since Phase 1; only the
+   doc comments describing their purpose changed. Folded into the
+   `Service.psm1` commit rather than shipped separately, per Marc's call.
+3. **`Core/Service.psm1`** (new) - NSSM-backed `Start-GSMServer`,
+   `Stop-GSMServer`, `Restart-GSMServer`, `Get-GSMServerStatus`,
+   `Install-GSMServerService`, `Uninstall-GSMServerService`,
+   `Set-GSMServiceCrashRecovery` (NSSM `AppExit=Restart`, 5s restart delay,
+   10s throttle - well above NSSM's stock 1500ms since game servers take
+   longer to bind ports/load maps). Same exported function
+   names/parameters as `Core/ProcessManager.psm1`, so it's a drop-in
+   replacement. `Config/<FolderName>.json` gained an optional
+   `ProcessManager` field (`'NSSM'` default, or `'ScheduledTask'` to keep
+   using the Phase 1 backend per server).
+4. **Repointed all five plugins' `Server.psm1`** from
+   `Core/ProcessManager.psm1` to `Core/Service.psm1` (built via five
+   parallel subagents, then independently re-verified file-by-file).
+   Bundled as one commit rather than five, since the diff was mechanically
+   identical across all five plugins.
+5. **`Core/Update.psm1`** (new) - `Update-GSMServer`, thin orchestration
+   only (no process-management or SteamCMD logic of its own). Composes
+   `Stop-GSMServer` -> `Update-SteamApp` -> `Start-GSMServer`. On update
+   failure, the server is left stopped with a clear error rather than
+   restarted into a possibly broken install.
+6. **Documentation close-out** - `CHANGELOG.md` gained a `[0.2.0-alpha]`
+   entry, `Docs/PRD.md` section 8 restructured into Phase 1/Phase 2
+   subsections with Phase 2's build order and exit criteria, section 9's
+   "later phases" table dropped the now-complete Phase 2 row (and the
+   stale "Windows Service" mention under Phase 3, which Phase 2 already
+   delivered), section 12's versioning table marks v0.2.0 complete, and a
+   new decisions-log entry documents the drop-in-replacement design and the
+   leave-stopped-on-failure choice. `VERSION` bumped to `0.2.0-alpha`.
 
 ## Key naming convention (re-confirm if it comes up again)
 
 Everything is keyed by the plugin's **folder name**, never `Plugin.json`'s
 `GameName` field: `L4D` and `L4D2` both have `GameName: "Left4Dead"`, so
-`Config/<FolderName>.json`, `Config/ServerStatus/<FolderName>.json`,
-`Backups/<FolderName>-<timestamp>.json`, and Scheduled Task name
-`GSM-<FolderName>` all use the folder name specifically to avoid the two
-plugins silently colliding.
+`Config/<FolderName>.json`, the NSSM service name `GSM-<FolderName>`
+(`Core/Service.psm1`), and the Scheduled Task name `GSM-<FolderName>`
+(`Core/ProcessManager.psm1`) all use the folder name specifically to avoid
+the two plugins silently colliding.
 
 ## Workflow reminders for continuing this
 
 - Marc runs Pester/PSScriptAnalyzer/git himself on his Windows machine
   (`D:\Projects\GSM\GameServerManager`) and pastes output back - this
-  sandbox has no PowerShell installed, and the bash-mounted copy of the repo
-  can lag behind real edits (confirmed stale at least twice this session) -
-  always verify file contents via the Read/Grep/Edit tools, not bash.
+  sandbox has no PowerShell installed. Always hand him ready-to-run git
+  commands rather than attempting git operations from this sandbox (stale
+  `.git/index.lock` issues on the Windows-mounted filesystem).
 - Run tests file-by-file in a fresh `pwsh -NoProfile` process (or via
   `Tests/Run-AllTests.ps1` for the whole suite) - do not chain many
   `Invoke-Pester` calls in one long-lived console session or run the whole
@@ -93,49 +85,19 @@ plugins silently colliding.
 - Two PSScriptAnalyzer categories are pre-accepted project-wide and don't
   need fixing: `PSUseShouldProcessForStateChangingFunctions`,
   `PSUseSingularNouns`. Everything else must be genuinely fixed.
+- When a test needs to see a command that lives inside another module's
+  own private scope (e.g. a plugin's `Server.psm1` doing a nested
+  `Import-Module Core/Service.psm1 -Force` internally), a bare
+  `Get-Command`/`Get-Module` lookup from the test file's global scope won't
+  find it - use Pester's `InModuleScope <ModuleName> { ... }` instead, which
+  runs the check from inside that module's own session state.
 
-## Fixed this session: Menu.psm1's GameName dispatch bug
+## Next: Phase 3 - Administration
 
-Was: `Invoke-GSMAction` looked up plugins by `Plugin.json`'s `GameName`
-field only, via `Select-Object -First 1`. L4D and L4D2 both report
-`GameName: "Left4Dead"`, so that silently picked L4D and made L4D2
-unreachable through the interactive menu or `GSM.ps1 -GameName ... -Action
-...`.
+Not started. Per the PRD (`Docs/PRD.md` section 9), Phase 3 (~2,000 lines)
+adds `Core/Firewall.psm1` (Windows Firewall rule management),
+`Core/Scheduler.psm1` (scheduled restarts/updates), `Core/Backup.psm1`
+(backup/restore), and `Core/Reports.psm1` (`ServerHealth.html` generation).
 
-**The fix (non-breaking, per Marc's steer - no rewrite of other scripts):**
-- `Invoke-GSMAction` (`Core/Menu.psm1`) gained an optional `-FolderName`
-  parameter, always unambiguous. `-GameName` still works exactly as before
-  for plugins with a unique `GameName` (Insurgency2014, TeamFortress2,
-  CounterStrikeSource); if `-GameName` now matches more than one plugin, it
-  returns `$false` with a logged error telling the caller to use
-  `-FolderName` instead of silently picking one. Exactly one of
-  `-GameName`/`-FolderName` must be supplied.
-- `Show-MainMenu` now lists and selects games by `FolderName` (displayed as
-  `FolderName: GameName Version`), so L4D and L4D2 both appear and are both
-  reachable.
-- `GSM.ps1` gained a `-FolderName` parameter as a non-breaking alternative
-  to `-GameName` (e.g. `./GSM.ps1 -FolderName L4D2 -Action Install`);
-  supplying both is a usage error.
-- `Tests/Menu.Tests.ps1` updated: new tests for `-FolderName` dispatch, the
-  ambiguous-`GameName` error path, the both-supplied/neither-supplied error
-  paths, and a regression test with two fake plugins sharing a `GameName`
-  but different `FolderName`s, asserting both are independently reachable.
-
-The old workaround (bypassing the menu, importing L4D2's modules directly)
-is no longer needed - `-FolderName L4D2` now works everywhere.
-
-**Not yet run:** Marc still needs to run `Tests/Run-AllTests.ps1` and
-PSScriptAnalyzer on his machine to confirm the new/changed tests actually
-pass end to end (this sandbox has no PowerShell installed).
-
-## Next: Phase 2 - Server Management
-
-Not started. Per the PRD (`Docs/PRD.md` section 9), Phase 2 (~2,000 lines)
-adds:
-- `Core/Service.psm1`: wraps servers as genuine Windows Services via a
-  service-wrapper tool (e.g. NSSM), replacing today's Scheduled-Task-based
-  `Core/ProcessManager.psm1` approach.
-- Update and crash recovery.
-
-No scope, design, or file-list decisions have been made for Phase 2 yet -
+No scope, design, or file-list decisions have been made for Phase 3 yet -
 that's the first thing to work out whenever this picks back up.

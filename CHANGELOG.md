@@ -1,6 +1,46 @@
 # Changelog
 
-## [Unreleased] - 2026-07-08
+## [Unreleased]
+
+## [0.2.0-alpha] - 2026-07-08
+
+### Status
+Phase 2 complete. All 6 deliverables shipped: NSSM binary bundling
+(`Core/NSSM.psm1`), NSSM-backed service management with crash recovery
+(`Core/Service.psm1`, a drop-in replacement for `Core/ProcessManager.psm1`),
+all five plugins repointed to it, and a stop/update/verify/restart lifecycle
+(`Core/Update.psm1`). 391/391 tests passing via `Tests/Run-AllTests.ps1`,
+PSScriptAnalyzer clean except the two pre-accepted
+`PSUseShouldProcessForStateChangingFunctions` and `PSUseSingularNouns`
+categories (see PRD decisions log).
+
+Next: Phase 3 - Administration (`Core/Firewall.psm1`, `Core/Scheduler.psm1`,
+`Core/Backup.psm1`, `Core/Reports.psm1`).
+
+### Added
+- `Core/NSSM.psm1`: downloads, hash-verifies, and extracts the NSSM binary,
+  mirroring `Core/SteamCMD.psm1`'s install pattern. Pinned installer URL and
+  SHA-256 hash live in `Config/NSSM.json`.
+- `Core/Service.psm1`: NSSM-backed `Start-GSMServer`, `Stop-GSMServer`,
+  `Restart-GSMServer`, `Get-GSMServerStatus`, plus
+  `Install-GSMServerService`/`Uninstall-GSMServerService` and
+  `Set-GSMServiceCrashRecovery` (NSSM `AppExit=Restart`, 5s restart delay,
+  10s throttle). Same exported function names and parameters as
+  `Core/ProcessManager.psm1`, so it's a drop-in replacement. Registers each
+  server as a genuine Windows Service running under GSM's service account.
+- `Config/<FolderName>.json` gained an optional `ProcessManager` field
+  (`'NSSM'`, the default, or `'ScheduledTask'`) - `Core/Service.psm1`'s
+  dispatcher reads it and delegates to `Core/ProcessManager.psm1`'s original
+  Scheduled Task logic when set to `'ScheduledTask'`, so existing configs
+  keep working unmodified.
+- All five plugins' `Server.psm1` wrappers (Insurgency2014, TeamFortress2,
+  CounterStrikeSource, L4D, L4D2) repointed from `Core/ProcessManager.psm1`
+  to `Core/Service.psm1` - no wrapper-level call-site changes needed.
+- `Core/Update.psm1`: `Update-GSMServer`, a thin orchestration function
+  composing `Stop-GSMServer`, `Update-SteamApp`, and `Start-GSMServer` into
+  a single update lifecycle. Leaves the server stopped, with a clear error,
+  rather than restarting into a possibly broken install if the SteamCMD
+  update fails.
 
 ### Fixed
 - `Core/Menu.psm1`'s `Invoke-GSMAction` dispatched by Plugin.json's `GameName`

@@ -1,6 +1,6 @@
 # GameServer Manager (GSM) - Product Requirements Document
 
-**Version:** 0.1.0-alpha (Phase 1)
+**Version:** 0.2.0-alpha (Phase 2)
 **Platform:** Windows 11, PowerShell 7+
 **License:** MIT
 **Author:** Marc Larouche
@@ -73,7 +73,10 @@ GameServerManager/
 │   ├── ServiceAccount.psm1  # Phase 1 - least-privilege local account provisioning
 │   ├── ProcessManager.psm1  # Phase 1 - Scheduled Task-based start/stop/restart/status
 │   ├── ConfigEditor.psm1    # Phase 1 - generic interactive config editor
-│   ├── Service.psm1         # Phase 2 - wraps servers as genuine Windows Services (NSSM-style)
+│   ├── NSSM.psm1            # Phase 2 - NSSM binary bundling (download/hash-verify/extract)
+│   ├── Service.psm1         # Phase 2 - NSSM-backed Windows Service start/stop/restart/status,
+│   │                        #   drop-in replacement for ProcessManager.psm1, with crash recovery
+│   ├── Update.psm1          # Phase 2 - stop/SteamCMD update/verify/restart lifecycle
 │   ├── Scheduler.psm1       # Phase 3 - scheduled restarts/updates
 │   ├── Backup.psm1          # Phase 3 - backup/restore
 │   ├── Firewall.psm1        # Phase 3 - Windows Firewall rule management
@@ -84,9 +87,9 @@ GameServerManager/
 │   ├── Insurgency2014/
 │   │   ├── Plugin.json      # AppID 237410, port 27015, Workshop + RCON
 │   │   ├── Install.psm1     # Phase 1 - SteamCMD install call for this game
-│   │   ├── Server.psm1      # Phase 1 - launch params, thin Start/Stop/Restart/
+│   │   ├── Server.psm1      # Phase 1/2 - launch params, thin Start/Stop/Restart/
 │   │   │                    #   Status/Configure wrappers around
-│   │   │                    #   Core/ProcessManager.psm1 and Core/ConfigEditor.psm1
+│   │   │                    #   Core/Service.psm1 and Core/ConfigEditor.psm1
 │   │   ├── Maps.psm1        # Phase 1 - map list, validation
 │   │   └── Modes.psm1       # Phase 1 - game mode list, validation
 │   ├── TeamFortress2/       # AppID 232250, port 27015, Workshop + RCON
@@ -138,7 +141,9 @@ The five Phase 1 plugins, with their confirmed dedicated server AppIDs:
 | `L4D` | Left 4 Dead | 222840 | No | Yes |
 | `L4D2` | Left 4 Dead 2 | 222860 | Yes | Yes |
 
-## 8. Phase 1 deliverables (build order)
+## 8. Deliverables (build order)
+
+### Phase 1 (complete)
 
 1. Repository structure (this scaffold)
 2. `Core/Config.psm1` - JSON config engine
@@ -160,12 +165,40 @@ The five Phase 1 plugins, with their confirmed dedicated server AppIDs:
 real dedicated servers for all five Phase 1 games, running under a dedicated
 least-privilege account, with no manual file editing.
 
+### Phase 2 (complete)
+
+1. `Core/NSSM.psm1` - NSSM binary bundling (download, hash-verify, extract),
+   mirroring `Core/SteamCMD.psm1`'s install pattern
+2. `ServiceAccount.psm1` doc update - `SeServiceLogonRight` documented as
+   used by `Core/Service.psm1`'s NSSM-backed service registration (the
+   account already held both `SeServiceLogonRight` and `SeBatchLogonRight`
+   since Phase 1; no functional change)
+3. `Core/Service.psm1` - NSSM-backed `Start-GSMServer`, `Stop-GSMServer`,
+   `Restart-GSMServer`, `Get-GSMServerStatus`, `Install-GSMServerService`,
+   `Uninstall-GSMServerService`, and `Set-GSMServiceCrashRecovery`; a
+   drop-in replacement for `Core/ProcessManager.psm1` (same exported
+   function names/parameters)
+4. All five plugins' `Server.psm1` wrappers repointed from
+   `Core/ProcessManager.psm1` to `Core/Service.psm1`
+5. `Core/Update.psm1` - `Update-GSMServer`, a stop/SteamCMD
+   update/verify/restart lifecycle, thin orchestration over `Service.psm1`
+   and `SteamCMD.psm1`
+6. This documentation update (CHANGELOG.md, PRD.md)
+
+**Exit criteria:** Every plugin's server runs as a genuine NSSM-managed
+Windows Service with automatic crash recovery.
+`Config/<FolderName>.json`'s optional `ProcessManager` field selects NSSM
+(default) or the original Scheduled Task backend per server, so Phase 1's
+approach is superseded as the default, not removed. `Update-GSMServer`
+provides a single update lifecycle that never restarts a server into a
+possibly broken install. 391/391 tests passing, PSScriptAnalyzer clean
+except the two pre-accepted categories (section 13).
+
 ## 9. Later phases (reference only, not built yet)
 
 | Phase | Focus | Est. lines | Adds |
 |---|---|---|---|
-| 2 | Server Management | ~2,000 | Update, crash recovery, `Service.psm1` |
-| 3 | Administration | ~2,000 | Firewall, Windows Service, Scheduler, Backup, Reports |
+| 3 | Administration | ~2,000 | Firewall, Scheduler, Backup, Reports |
 | 4 | Professional Features | ~3,000+ | Web dashboard, RCON, Discord, Workshop, plugin marketplace |
 
 ## 10. Security requirements (all phases)
@@ -192,7 +225,7 @@ least-privilege account, with no manual file editing.
 | Version | Milestone |
 |---|---|
 | v0.1.0 | Phase 1 complete: full framework, all five game plugins, tests passing |
-| v0.2.0 | Server Management |
+| v0.2.0 | Phase 2 complete: NSSM-backed `Service.psm1`, crash recovery, `Update.psm1` |
 | v0.3.0 | Administration |
 | v0.4.0 | Monitoring |
 | v1.0.0 | Stable release |
@@ -219,3 +252,12 @@ least-privilege account, with no manual file editing.
   are not unit tested" note was inaccurate and has been removed:
   `Tests/ServiceAccount.Tests.ps1` has had mocked coverage of those calls
   since before that note was written.
+- Phase 2 (`Core/NSSM.psm1`, `Core/Service.psm1`, `Core/Update.psm1`) is
+  complete. `Service.psm1` is a drop-in replacement for
+  `Core/ProcessManager.psm1` (same exported function names/parameters), not
+  a rename - `Config/<FolderName>.json`'s optional `ProcessManager` field
+  lets a server opt back into the original Scheduled Task backend, so
+  Phase 1's approach isn't removed, only superseded as the default.
+  `Update-GSMServer` deliberately leaves a server stopped, not restarted,
+  when a SteamCMD update fails - restarting into a possibly broken install
+  was judged worse than a clear, visible failure.
