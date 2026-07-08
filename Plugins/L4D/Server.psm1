@@ -14,7 +14,7 @@
     Get-L4DServerStatus, New-L4DConfig.
 
     Start/Stop/Restart/Status (PRD section 8 item 11) and Configure (item
-    12) are now implemented as thin wrappers around Core/ProcessManager.psm1
+    12) are now implemented as thin wrappers around Core/Service.psm1
     and Core/ConfigEditor.psm1 respectively: this module only supplies its
     own identity (FolderName, Executable, AppID, DefaultPort) and the names
     of its own Get-L4DLaunchArgs / Get-L4DMaps / Get-L4DModes /
@@ -47,7 +47,7 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Maps.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Modes.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ProcessManager.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Service.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ConfigEditor.psm1') -Force
 
 function Get-L4DConfigPropertyValue {
@@ -225,11 +225,11 @@ function Get-L4DLaunchArgs {
 function Start-L4DServer {
     <#
     .SYNOPSIS
-        Starts the L4D server via Core/ProcessManager.psm1.
+        Starts the L4D server via Core/Service.psm1.
     .DESCRIPTION
         Thin wrapper: delegates to Start-GSMServer with this plugin's
         FolderName, Executable, and launch-argument function name. See
-        Core/ProcessManager.psm1 for the actual Scheduled Task lifecycle.
+        Core/Service.psm1 for the actual Scheduled Task lifecycle.
     .EXAMPLE
         Start-L4DServer
     .NOTES
@@ -247,7 +247,7 @@ function Start-L4DServer {
 function Stop-L4DServer {
     <#
     .SYNOPSIS
-        Stops the L4D server via Core/ProcessManager.psm1.
+        Stops the L4D server via Core/Service.psm1.
     .DESCRIPTION
         Thin wrapper: delegates to Stop-GSMServer with this plugin's
         FolderName.
@@ -264,7 +264,7 @@ function Stop-L4DServer {
 function Restart-L4DServer {
     <#
     .SYNOPSIS
-        Restarts the L4D server via Core/ProcessManager.psm1.
+        Restarts the L4D server via Core/Service.psm1.
     .DESCRIPTION
         Thin wrapper: delegates to Restart-GSMServer with this plugin's
         FolderName, Executable, and launch-argument function name.

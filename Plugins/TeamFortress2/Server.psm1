@@ -15,7 +15,7 @@
     Get-TeamFortress2ServerStatus, New-TeamFortress2Config.
 
     Start/Stop/Restart/Status (PRD section 8 item 11) and Configure (item
-    12) are now implemented as thin wrappers around Core/ProcessManager.psm1
+    12) are now implemented as thin wrappers around Core/Service.psm1
     and Core/ConfigEditor.psm1 respectively: this module only supplies its
     own identity (FolderName, Executable, AppID, DefaultPort) and the names
     of its own Get-TeamFortress2LaunchArgs / Get-TeamFortress2Maps /
@@ -51,7 +51,7 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Maps.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Modes.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ProcessManager.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Service.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ConfigEditor.psm1') -Force
 
 function Get-TeamFortress2ConfigPropertyValue {
@@ -231,11 +231,11 @@ function Get-TeamFortress2LaunchArgs {
 function Start-TeamFortress2Server {
     <#
     .SYNOPSIS
-        Starts the TeamFortress2 server via Core/ProcessManager.psm1.
+        Starts the TeamFortress2 server via Core/Service.psm1.
     .DESCRIPTION
         Thin wrapper: delegates to Start-GSMServer with this plugin's
         FolderName, Executable, and launch-argument function name. See
-        Core/ProcessManager.psm1 for the actual Scheduled Task lifecycle.
+        Core/Service.psm1 for the actual Scheduled Task lifecycle.
     .EXAMPLE
         Start-TeamFortress2Server
     .NOTES
@@ -253,7 +253,7 @@ function Start-TeamFortress2Server {
 function Stop-TeamFortress2Server {
     <#
     .SYNOPSIS
-        Stops the TeamFortress2 server via Core/ProcessManager.psm1.
+        Stops the TeamFortress2 server via Core/Service.psm1.
     .DESCRIPTION
         Thin wrapper: delegates to Stop-GSMServer with this plugin's
         FolderName.
@@ -270,7 +270,7 @@ function Stop-TeamFortress2Server {
 function Restart-TeamFortress2Server {
     <#
     .SYNOPSIS
-        Restarts the TeamFortress2 server via Core/ProcessManager.psm1.
+        Restarts the TeamFortress2 server via Core/Service.psm1.
     .DESCRIPTION
         Thin wrapper: delegates to Restart-GSMServer with this plugin's
         FolderName, Executable, and launch-argument function name.

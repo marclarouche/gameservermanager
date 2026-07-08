@@ -6,7 +6,7 @@
     Builds the srcds.exe launch parameter string from a config object and
     validates that config object, and provides start/stop/restart/status
     and interactive config-editing wrappers around the shared
-    Core/ProcessManager.psm1 and Core/ConfigEditor.psm1 modules.
+    Core/Service.psm1 and Core/ConfigEditor.psm1 modules.
 .NOTES
     Functions implemented: Get-CounterStrikeSourceLaunchArgs,
     Test-CounterStrikeSourceServerConfig, Start-CounterStrikeSourceServer,
@@ -45,7 +45,7 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Maps.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Modes.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ProcessManager.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Service.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/ConfigEditor.psm1') -Force
 
 function Get-CounterStrikeSourceConfigPropertyValue {
@@ -220,11 +220,11 @@ function Get-CounterStrikeSourceLaunchArgs {
 function Start-CounterStrikeSourceServer {
     <#
     .SYNOPSIS
-        Starts the CounterStrikeSource server via Core/ProcessManager.psm1.
+        Starts the CounterStrikeSource server via Core/Service.psm1.
     .DESCRIPTION
         Thin wrapper: delegates to Start-GSMServer with this plugin's
         FolderName, Executable, and launch-argument function name. See
-        Core/ProcessManager.psm1 for the actual Scheduled Task lifecycle.
+        Core/Service.psm1 for the actual Scheduled Task lifecycle.
     .EXAMPLE
         Start-CounterStrikeSourceServer
     .NOTES
@@ -242,7 +242,7 @@ function Start-CounterStrikeSourceServer {
 function Stop-CounterStrikeSourceServer {
     <#
     .SYNOPSIS
-        Stops the CounterStrikeSource server via Core/ProcessManager.psm1.
+        Stops the CounterStrikeSource server via Core/Service.psm1.
     .DESCRIPTION
         Thin wrapper: delegates to Stop-GSMServer with this plugin's
         FolderName.
@@ -259,7 +259,7 @@ function Stop-CounterStrikeSourceServer {
 function Restart-CounterStrikeSourceServer {
     <#
     .SYNOPSIS
-        Restarts the CounterStrikeSource server via Core/ProcessManager.psm1.
+        Restarts the CounterStrikeSource server via Core/Service.psm1.
     .DESCRIPTION
         Thin wrapper: delegates to Restart-GSMServer with this plugin's
         FolderName, Executable, and launch-argument function name.

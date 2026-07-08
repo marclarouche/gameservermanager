@@ -30,6 +30,20 @@ BeforeAll {
 
 Describe 'Plugins/TeamFortress2/Server.psm1' {
 
+    Context 'Module dependency' {
+        It 'delegates lifecycle actions to Core/Service.psm1, not Core/ProcessManager.psm1, directly' {
+            # Server.psm1's own `Import-Module Core/Service.psm1 -Force` is a
+            # nested import scoped to Server.psm1's own session state, so
+            # Start-GSMServer never becomes visible via a global Get-Module
+            # or Get-Command lookup from this test file. InModuleScope runs
+            # the check from inside Server.psm1's own scope, where the
+            # nested import actually lands.
+            InModuleScope Server {
+                (Get-Command -Name Start-GSMServer).ModuleName | Should -Be 'Service'
+            }
+        }
+    }
+
     Context 'Config.template.json' {
         It 'round-trips through Core/Config.psm1''s Test-GSMConfig without any changes to that module' {
             $rawJson = Get-Content -Path $script:ConfigTemplatePath -Raw
