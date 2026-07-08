@@ -1,0 +1,8 @@
+{
+  "InstallerUrl": "https://nssm.cc/ci/nssm-2.24-101-g897c7ad.zip",
+  "PinnedFile": "win64/nssm.exe",
+  "PinnedSHA256": "EEE9C44C29C2BE011F1F1E43BB8C3FCA888CB81053022EC5A0060035DE16D848",
+  "VerifiedBy": "Marc Larouche",
+  "VerifiedDate": "2026-07-08",
+  "Notes": "Pre-release build 2.24-101-g897c7ad (2017-04-26) - required for Windows 10 Creators Update and newer to avoid a service-start failure present in the 2.24 stable release, per https://nssm.cc/download. Hash computed against win64/nssm.exe extracted from the release zip, not the zip itself. Update this value manually and re-verify when a newer NSSM build is pinned."
+}

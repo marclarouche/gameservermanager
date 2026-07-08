@@ -1,0 +1,8 @@
+{
+  "InstallerUrl": "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip",
+  "PinnedSHA256": "FC103A323D70CAAAC475AE1CFCACFD8EEC4C6B1E130005C4793F2013B4B019F8",
+  "PinnedFile": "steamcmd.exe",
+  "VerifiedBy": "Marc Larouche",
+  "VerifiedDate": "2026-07-05",
+  "Notes": "Hash computed against the extracted steamcmd.exe, not the zip. Update this value manually and re-verify when a newer SteamCMD is pinned. Install-SteamCMD fails closed on any mismatch."
+}

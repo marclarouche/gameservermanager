@@ -1,5 +1,7 @@
 Config/*
 !Config/.gitkeep
+!Config/SteamCMD.json
+!Config/NSSM.json
 Logs/*
 !Logs/.gitkeep
 Reports/*
@@ -8,3 +10,5 @@ Backups/*
 !Backups/.gitkeep
 SteamCMD/*
 !SteamCMD/.gitkeep
+Tools/*
+!Tools/.gitkeep
