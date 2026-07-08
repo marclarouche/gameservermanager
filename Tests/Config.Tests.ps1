@@ -66,4 +66,28 @@ Describe 'Core/Config.psm1' {
         Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410"}'
         { Get-GSMConfig -Path $path } | Should -Not -Throw
     }
+
+    It 'loads a valid config that omits the optional ProcessManager field entirely' {
+        $path = Join-Path $script:TestDir 'no-processmanager.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410"}'
+        { Get-GSMConfig -Path $path } | Should -Not -Throw
+    }
+
+    It 'loads a valid config with ProcessManager set to NSSM' {
+        $path = Join-Path $script:TestDir 'pm-nssm.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","ProcessManager":"NSSM"}'
+        { Get-GSMConfig -Path $path } | Should -Not -Throw
+    }
+
+    It 'loads a valid config with ProcessManager set to ScheduledTask' {
+        $path = Join-Path $script:TestDir 'pm-scheduledtask.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","ProcessManager":"ScheduledTask"}'
+        { Get-GSMConfig -Path $path } | Should -Not -Throw
+    }
+
+    It 'rejects an invalid ProcessManager value' {
+        $path = Join-Path $script:TestDir 'pm-invalid.json'
+        Set-Content -Path $path -Value '{"GameName":"Insurgency","AppID":"237410","ProcessManager":"Docker"}'
+        { Get-GSMConfig -Path $path } | Should -Throw
+    }
 }

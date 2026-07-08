@@ -90,6 +90,18 @@ function Test-GSMConfig {
         throw "LaunchOptions contains unsafe characters. Shell metacharacters are not allowed."
     }
 
+    # Optional (Phase 2): selects which backend Core/Service.psm1's
+    # dispatcher functions use - 'NSSM' (a real Windows Service, the
+    # default) or 'ScheduledTask' (Core/ProcessManager.psm1's original
+    # Phase 1 behavior). Validated only if present; a config that omits it
+    # entirely is still valid; Core/Service.psm1 treats a missing field as
+    # 'NSSM', not this function - existing configs written before this
+    # field existed keep working unmodified.
+    $processManager = Get-GSMConfigPropertyValue -Config $Config -Name 'ProcessManager'
+    if ($processManager -and ($processManager -notin @('NSSM', 'ScheduledTask'))) {
+        throw "ProcessManager '$processManager' is invalid. Must be 'NSSM' or 'ScheduledTask'."
+    }
+
     $topLevelKeys = [System.Collections.Generic.List[string]]::new()
     $keyMatches = [regex]::Matches($RawJson, '"([^"]+)"\s*:')
     foreach ($match in $keyMatches) {

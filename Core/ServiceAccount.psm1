@@ -5,12 +5,14 @@
 .DESCRIPTION
     Phase 1. Creates and configures a dedicated local Windows account under
     which game servers run, instead of the interactive admin account. Grants
-    only what's needed: SeServiceLogonRight (log on as a service - reserved
-    for a future Phase 1 Windows Service registration, Core/Service.psm1),
-    SeBatchLogonRight (log on as a batch job - used today by
-    Core/ProcessManager.psm1's Scheduled Task-based server launch), and
-    Modify access to GSM's install/config/log/backup/server folders. Does not
-    grant local admin rights.
+    only what's needed: SeServiceLogonRight (log on as a service - used by
+    Core/Service.psm1's NSSM-backed Windows Service registration, Phase 2),
+    SeBatchLogonRight (log on as a batch job - used by
+    Core/ProcessManager.psm1's Scheduled Task-based server launch, and still
+    granted as Core/Service.psm1's fallback path for a plugin config whose
+    ProcessManager field selects "ScheduledTask"), and Modify access to
+    GSM's install/config/log/backup/server folders. Does not grant local
+    admin rights.
 
     This module only provisions the account. Registering a real Windows
     Service under this account (with a service wrapper, since srcds.exe and
