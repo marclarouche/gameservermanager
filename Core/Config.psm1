@@ -219,6 +219,13 @@ function Set-GSMConfig {
 
     Test-GSMConfig -Config $Config -RawJson $rawJson
 
+    # Matches Core/ProcessManager.psm1's Get-GSMServerStatusPath call site:
+    # derives the parent directory from $Path and creates it if missing,
+    # since Set-Content itself does not. A no-op when it already exists
+    # (every dev checkout already has Config/ via its tracked .gitkeep) -
+    # this only matters for a fresh install that doesn't.
+    New-Item -ItemType Directory -Path (Split-Path -Path $Path -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
+
     try {
         Set-Content -Path $Path -Value $rawJson -ErrorAction Stop
     }

@@ -55,6 +55,18 @@ Describe 'Core/Config.psm1' {
         (Get-GSMConfig -Path $path).AppID | Should -Be '237410'
     }
 
+    It 'creates the target directory when it does not exist yet' {
+        $path = Join-Path $script:TestDir 'not-created-yet/newconfig.json'
+        $cfg = [PSCustomObject]@{ GameName = 'Insurgency'; AppID = '237410'; DefaultPort = 27015 }
+
+        Test-Path -Path (Split-Path -Path $path -Parent) | Should -Be $false
+
+        { Set-GSMConfig -Path $path -Config $cfg } | Should -Not -Throw
+
+        Test-Path -Path $path -PathType Leaf | Should -Be $true
+        (Get-GSMConfig -Path $path).AppID | Should -Be '237410'
+    }
+
     It 'rejects writing an invalid config' {
         $path = Join-Path $script:TestDir 'invalid-write.json'
         $cfg = [PSCustomObject]@{ GameName = 'Insurgency'; AppID = '237410'; DefaultPort = 0 }
