@@ -13,6 +13,7 @@ Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Utilities.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Logging.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'PluginLoader.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'RCON.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Workshop.psm1') -Force
 
 # Maps each action to the plugin function name it expects, with {0} standing
 # in for the plugin's FolderName (e.g. 'Insurgency2014'). Start/Stop/Restart/
@@ -213,7 +214,18 @@ function Show-MainMenu {
             continue
         }
 
-        $selectedAction = Read-GSMPrompt -Message 'Select an action (Install, Start, Stop, Restart, Status, Configure, RCON Console)' -ValidValues @('Install', 'Start', 'Stop', 'Restart', 'Status', 'Configure', 'RCON Console')
+        # "Manage Workshop Items" is shown only for a plugin whose Plugin.json
+        # sets SupportsWorkshop true (Insurgency2014, TeamFortress2, L4D2) -
+        # the same conditional-visibility idea as SupportsRCON gating RCON
+        # itself, just applied to the menu's action list rather than a
+        # connection attempt.
+        $selectedPlugin = $plugins | Where-Object { $_.FolderName -eq $selectedFolder } | Select-Object -First 1
+        $actionChoices = @('Install', 'Start', 'Stop', 'Restart', 'Status', 'Configure', 'RCON Console')
+        if ($selectedPlugin.SupportsWorkshop) {
+            $actionChoices += 'Manage Workshop Items'
+        }
+
+        $selectedAction = Read-GSMPrompt -Message "Select an action ($($actionChoices -join ', '))" -ValidValues $actionChoices
 
         if ($selectedAction -eq 'RCON Console') {
             # Blocking/interactive, unlike every other action here - it has
@@ -221,6 +233,14 @@ function Show-MainMenu {
             # Invoke-GSMAction's $script:GSMActionFunctionTemplates dispatch
             # entirely and calls Start-GSMRCONConsole directly.
             Start-GSMRCONConsole -FolderName $selectedFolder
+            continue
+        }
+
+        if ($selectedAction -eq 'Manage Workshop Items') {
+            # Blocking/interactive, same reasoning as RCON Console above -
+            # bypasses Invoke-GSMAction's dispatch table and calls
+            # Core/Workshop.psm1's own sub-menu directly.
+            Show-GSMWorkshopMenu -FolderName $selectedFolder
             continue
         }
 
