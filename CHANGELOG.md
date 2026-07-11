@@ -2,6 +2,58 @@
 
 ## [Unreleased]
 
+## [0.5.0-alpha] - 2026-07-11
+
+### Status
+Phase 5 (Workshop Support) complete. 518/518 tests passing via
+`Tests/Run-AllTests.ps1`, PSScriptAnalyzer clean except the two
+pre-accepted `PSUseShouldProcessForStateChangingFunctions` and
+`PSUseSingularNouns` categories.
+
+Next: not yet scoped - see Known gaps below (nightly refresh integration,
+the subscribe/unsubscribe asymmetry on a failed placement, and live
+install verification) for candidate follow-up work.
+
+### Added
+- `Core/Workshop.psm1`: generic SteamCMD Workshop mechanics -
+  `Add-GSMWorkshopItem`, `Remove-GSMWorkshopItem`, `Get-GSMWorkshopItems`,
+  `Update-GSMWorkshopItems` - backed by the existing `WorkshopItems` array
+  in `Config/<FolderName>.json` (previously populated by hand via
+  `Core/ConfigEditor.psm1`; this is the first thing to populate it
+  automatically). Gated on `Plugin.json`'s `SupportsWorkshop` field, the
+  same fail-closed pattern used elsewhere for gated features.
+- Workshop placement/removal logic added to each Workshop-capable plugin's
+  `Install.psm1`: Insurgency2014 links downloaded content as a directory
+  junction (avoids duplicating large map packages on disk), TeamFortress2
+  and L4D2 copy it instead (VPK-based content, compatibility over disk
+  savings).
+- `Core/Menu.psm1`: "Manage Workshop Items" action, shown only when the
+  selected plugin's `SupportsWorkshop` is true, with add/remove/list/
+  refresh sub-actions dispatched through `Core/Workshop.psm1`'s own
+  `Show-GSMWorkshopMenu`.
+- CounterStrikeSource and L4D reject Workshop calls with a clear error via
+  the existing `SupportsWorkshop: false` gate - no plugin-specific code
+  needed for either.
+
+### Fixed
+- Two instances of the same `Set-StrictMode`-visible gotcha: `return
+  $array` enumerates an array onto the output pipeline, so a
+  zero-element array returns as `$null`, not an empty array - one in
+  `Workshop.psm1`'s internal item-list reader (`Get-GSMWorkshopItemsArray`,
+  now uses `Write-Output -NoEnumerate`), one in `Show-GSMWorkshopMenu`'s
+  List branch, where a redundant `@(...)` wrap around an already-array
+  result risked nesting a real multi-item list into a single element.
+
+### Known gaps (carried forward)
+- A failed placement after a successful SteamCMD download leaves files in
+  SteamCMD's own workshop content folder without recording the
+  subscription - a minor subscribe/unsubscribe asymmetry, not a data-loss
+  risk.
+- Nightly Workshop refresh via `Core/Scheduler.psm1` is not yet wired in -
+  `Update-GSMWorkshopItems` is manual-only, invoked from the menu.
+- Live Start/Stop/Restart verification against a real installed instance
+  is still outstanding, pending an installable package to test against.
+
 ## [0.4.0-alpha] - 2026-07-11
 
 ### Status
