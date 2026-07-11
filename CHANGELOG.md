@@ -2,6 +2,81 @@
 
 ## [Unreleased]
 
+## [0.4.0-alpha] - 2026-07-11
+
+### Status
+Phase 4 (Professional Features) complete. Both deliverables shipped:
+a Source RCON console (`Core/RCON.psm1`) and a local web dashboard
+(`Core/Dashboard.psm1`). Discord notifications were dropped from Phase 4
+scope entirely (Marc doesn't plan to use it), the plugin marketplace was
+cut entirely (doesn't fit an offline-first, zero-telemetry tool), and
+Workshop support was deferred to a new Phase 5 (see the PRD decisions
+log). 484/484 tests passing via `Tests/Run-AllTests.ps1`, PSScriptAnalyzer
+clean except the two pre-accepted `PSUseShouldProcessForStateChangingFunctions`
+and `PSUseSingularNouns` categories. One genuine finding surfaced and was
+fixed during this phase: `PSAvoidUsingEmptyCatchBlock` in `Dashboard.psm1`'s
+best-effort "send a 500 back to the client" catch, which now logs a
+warning instead of silently swallowing the exception.
+
+Next: Phase 5 - Workshop Support (Steam Workshop item install/update for
+Workshop-capable plugins).
+
+### Added
+- `Core/RCON.psm1`: `Send-GSMRCONCommand` (stateless one-shot: connect,
+  auth, send one command, read one response, close) and
+  `Start-GSMRCONConsole` (a thin interactive REPL built on the same
+  connect/auth logic, kept in one place so the two never duplicate it).
+  Implements Valve's Source RCON Protocol (TCP, binary packets) as one
+  generic module - all five plugins are Source engine and share the same
+  protocol, so there is no per-plugin RCON code. Resolves the target
+  instance's port from `Plugin.json`'s `DefaultPort` and its RCON password
+  from `Config/<FolderName>.json`'s `RCONPassword`; connects to `127.0.0.1`
+  only. `New-GSMRCONConnection` is the module's sole seam for Pester
+  mocking (an in-memory stream pair stands in for the real TCP socket).
+  v1 reads a single response packet only - it does not reassemble a
+  response split across multiple `SERVERDATA_RESPONSE_VALUE` packets, so
+  very long command output (e.g. `status` on a full server) may be
+  truncated; this is documented in the function's own `.NOTES`, not a
+  silent gap. Connection-refused, authentication-failure, and timeout
+  each produce a distinct, clear error message, and `RCONPassword` is
+  never written to a log message or surfaced in an error string. Wired
+  into `Core/Menu.psm1` as a new "RCON Console" action, dispatched
+  directly rather than through `Invoke-GSMAction`'s
+  `$script:GSMActionFunctionTemplates` table, since it's blocking/
+  interactive with no simple success/failure result to report.
+- `Core/Dashboard.psm1`: `Start-GSMDashboard`, a local web dashboard
+  served over `System.Net.HttpListener` bound to `127.0.0.1` only - no
+  external dependency, consistent with the project's PowerShell-7-only
+  dependency rule, and no auth layer added since that trust boundary
+  (loopback-only) needs none. Serves a single static HTML/vanilla-JS page
+  at `/` (no external JS library, no server-side templating - all dynamic
+  data is fetched client-side), a polled JSON status endpoint at
+  `GET /api/status` (reusing `Core/Reports.psm1`'s own
+  `Get-GSMServerHealthReportData` rather than duplicating instance/system
+  discovery), and two POST endpoints: `/api/action`
+  (`{ FolderName, Action }`, Start/Stop/Restart dispatched through
+  `Core/Menu.psm1`'s `Invoke-GSMAction`) and `/api/rcon`
+  (`{ FolderName, Command }`, dispatched through `Core/RCON.psm1`'s
+  `Send-GSMRCONCommand`). Both dispatch endpoints reuse the console's own
+  dispatch functions, so logging and behavior never diverge between the
+  console and the dashboard. `Invoke-GSMDashboardRequest` routes an
+  already-parsed Method/Path/Body to the right handler and is the
+  module's sole seam for Pester - `Start-GSMDashboard`'s real
+  `HttpListener` loop is not unit tested directly, the same way
+  `RCON.psm1`'s real TCP connection isn't. Interactive from v1: run as a
+  foreground blocking loop from a new "Dashboard" `Menu.psm1` action
+  (Ctrl+C to stop), not a background service. Wired into `Menu.psm1` as a
+  top-level choice alongside "Exit" (not inside the per-game action list),
+  since the dashboard spans every instance rather than acting on one
+  selected game; `Core/Dashboard.psm1` is imported lazily inside that menu
+  branch rather than at `Menu.psm1`'s own top level, since
+  `Dashboard.psm1` itself imports `Menu.psm1` (for `Invoke-GSMAction`) and
+  an unconditional top-level import the other way would be a circular
+  `Import-Module -Force` loop.
+- `Core/Reports.psm1`'s `Get-GSMServerHealthReportData` is now exported
+  (previously internal-only) so `Core/Dashboard.psm1` can reuse it - no
+  logic changes, just an added export.
+
 ## [0.3.0-alpha] - 2026-07-08
 
 ### Status

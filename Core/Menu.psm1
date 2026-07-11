@@ -12,6 +12,7 @@ Set-StrictMode -Version Latest
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Utilities.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Logging.psm1') -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'PluginLoader.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'RCON.psm1') -Force
 
 # Maps each action to the plugin function name it expects, with {0} standing
 # in for the plugin's FolderName (e.g. 'Insurgency2014'). Start/Stop/Restart/
@@ -190,14 +191,38 @@ function Show-MainMenu {
         # Selection is keyed by FolderName, not GameName: two plugins can
         # report the same Plugin.json GameName (e.g. L4D and L4D2 both say
         # 'Left4Dead'), and FolderName is guaranteed unique by Find-GSMPlugins.
-        $gameChoices = @($plugins.FolderName) + 'Exit'
-        $selectedFolder = Read-GSMPrompt -Message 'Select a game by its folder name shown above (or Exit to quit)' -ValidValues $gameChoices
+        # Dashboard sits at this level, not in the per-game action list
+        # below: it's a whole-of-GSM view across every instance, not an
+        # action performed against one selected game.
+        $gameChoices = @($plugins.FolderName) + @('Dashboard', 'Exit')
+        $selectedFolder = Read-GSMPrompt -Message 'Select a game by its folder name shown above, Dashboard for the web dashboard, or Exit to quit' -ValidValues $gameChoices
 
         if ($selectedFolder -eq 'Exit') {
             return
         }
 
-        $selectedAction = Read-GSMPrompt -Message 'Select an action (Install, Start, Stop, Restart, Status, Configure)' -ValidValues @('Install', 'Start', 'Stop', 'Restart', 'Status', 'Configure')
+        if ($selectedFolder -eq 'Dashboard') {
+            # Lazily imported here, not at this module's own top level:
+            # Core/Dashboard.psm1 imports Core/Menu.psm1 (for Invoke-GSMAction),
+            # so importing it unconditionally from Menu.psm1's own top-level
+            # script would be a circular Import-Module -Force loop. Blocking/
+            # interactive like RCON Console below, and likewise bypasses
+            # Invoke-GSMAction's dispatch table entirely.
+            Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Dashboard.psm1') -Force
+            Start-GSMDashboard
+            continue
+        }
+
+        $selectedAction = Read-GSMPrompt -Message 'Select an action (Install, Start, Stop, Restart, Status, Configure, RCON Console)' -ValidValues @('Install', 'Start', 'Stop', 'Restart', 'Status', 'Configure', 'RCON Console')
+
+        if ($selectedAction -eq 'RCON Console') {
+            # Blocking/interactive, unlike every other action here - it has
+            # no simple success/failure result to report, so it bypasses
+            # Invoke-GSMAction's $script:GSMActionFunctionTemplates dispatch
+            # entirely and calls Start-GSMRCONConsole directly.
+            Start-GSMRCONConsole -FolderName $selectedFolder
+            continue
+        }
 
         $succeeded = Invoke-GSMAction -FolderName $selectedFolder -Action $selectedAction
 

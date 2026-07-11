@@ -1,6 +1,6 @@
 # GameServer Manager (GSM) - Product Requirements Document
 
-**Version:** 0.3.0-alpha (Phase 3)
+**Version:** 0.4.0-alpha (Phase 4)
 **Platform:** Windows 11, PowerShell 7+
 **License:** MIT
 **Author:** Marc Larouche
@@ -37,7 +37,8 @@ sixth game later is still just a new folder, no core changes.
 ## 4. Non-goals (Phase 1)
 
 - Web dashboard (Phase 4)
-- RCON console, Discord notifications, Workshop support (Phase 4)
+- RCON console (Phase 4)
+- Workshop support (Phase 5)
 - Any game plugin beyond the five listed in section 3
 - Running servers as a genuine Windows Service (that's `Core/Service.psm1`,
   Phase 2, via a service-wrapper tool); Phase 1 wires the ServiceAccount into
@@ -81,7 +82,8 @@ GameServerManager/
 │   ├── Backup.psm1          # Phase 3 - backup/restore
 │   ├── Firewall.psm1        # Phase 3 - Windows Firewall rule management
 │   ├── Reports.psm1         # Phase 3 - ServerHealth.html generation
-│   └── Dashboard.psm1       # Phase 4 - live status view
+│   ├── RCON.psm1            # Phase 4 - Source RCON console
+│   └── Dashboard.psm1       # Phase 4 - local web dashboard
 │
 ├── Plugins/
 │   ├── Insurgency2014/
@@ -222,11 +224,35 @@ generated covering plugins, ports, firewall rules, backups, and host
 system status. All four modules are Core-level and instance-generic - no
 plugin-specific code changed (PRD section 13 decisions log).
 
+### Phase 4 (complete)
+
+1. `Core/RCON.psm1` - `Send-GSMRCONCommand` (stateless one-shot: connect,
+   auth, send one command, read one response, close) and
+   `Start-GSMRCONConsole` (a thin interactive REPL on the same connect/auth
+   logic). Implements Valve's Source RCON Protocol as one generic module -
+   all five plugins are Source engine and share it. Wired into
+   `Menu.psm1` as a new "RCON Console" action.
+2. `Core/Dashboard.psm1` - `Start-GSMDashboard`, a local web dashboard over
+   `System.Net.HttpListener` bound to `127.0.0.1` only. Serves a static
+   HTML/vanilla-JS page, a polled JSON status endpoint (reusing
+   `Reports.psm1`'s `Get-GSMServerHealthReportData`), and Start/Stop/
+   Restart + RCON command dispatch through the existing `Invoke-GSMAction`
+   and `Send-GSMRCONCommand`. Wired into `Menu.psm1` as a new "Dashboard"
+   top-level choice.
+3. `Core/Reports.psm1`'s `Get-GSMServerHealthReportData` exported
+   (previously internal-only) for `Dashboard.psm1` to reuse
+4. This documentation update (CHANGELOG.md, PRD.md)
+
+**Exit criteria:** Every server instance's RCON console is reachable both
+from the interactive menu and from a local web dashboard that also
+exposes live status and Start/Stop/Restart, with no plugin-specific code
+needed for either (PRD section 13 decisions log).
+
 ## 9. Later phases (reference only, not built yet)
 
 | Phase | Focus | Est. lines | Adds |
 |---|---|---|---|
-| 4 | Professional Features | ~3,000+ | Web dashboard, RCON, Discord, Workshop, plugin marketplace |
+| 5 | Workshop Support | TBD | Steam Workshop item install/update for Workshop-capable plugins |
 
 ## 10. Security requirements (all phases)
 
@@ -254,7 +280,8 @@ plugin-specific code changed (PRD section 13 decisions log).
 | v0.1.0 | Phase 1 complete: full framework, all five game plugins, tests passing |
 | v0.2.0 | Phase 2 complete: NSSM-backed `Service.psm1`, crash recovery, `Update.psm1` |
 | v0.3.0 | Phase 3 complete: `Firewall.psm1`, `Scheduler.psm1`, `Backup.psm1`, `Reports.psm1` |
-| v0.4.0 | Monitoring |
+| v0.4.0 | Phase 4 complete: `Core/RCON.psm1`, `Core/Dashboard.psm1` |
+| v0.5.0 | Phase 5 complete: Workshop support |
 | v1.0.0 | Stable release |
 
 ## 13. Decisions log
@@ -309,3 +336,55 @@ plugin-specific code changed (PRD section 13 decisions log).
   not executed as part of this work: the sandbox this was built in has no
   PowerShell installed. Test counts and any PSScriptAnalyzer findings are
   pending Marc's local run.
+- Phase 4 drops Discord notifications from scope - Marc doesn't plan to use
+  it. Phase 4 is now: web dashboard, RCON console. RCON ships first (`Core/RCON.psm1`), then the web dashboard
+  (`Core/Dashboard.psm1`), which depends on RCON for its command box. RCON
+  scope: one generic module (all five plugins are Source engine, same
+  protocol), `Send-GSMRCONCommand` as a stateless one-shot primitive
+  (connect/auth/send/read/close, using the existing per-instance
+  `RCONPassword` config field and `DefaultPort`), `Start-GSMRCONConsole` as
+  a thin REPL built on top of it, wired into `Menu.psm1` as a new action.
+  Commands sent are written to the chained-hash audit log via
+  `Core/Logging.psm1` - command text and target instance, never the
+  password. Dashboard scope: `System.Net.HttpListener` (no external
+  dependency, consistent with the project's PowerShell-7-only dependency
+  rule), bound to `127.0.0.1` only (no auth layer needed at that trust
+  boundary), reusing `Reports.psm1`'s existing data-gathering functions for
+  a polled JSON status endpoint, interactive from v1 - start/stop/restart
+  dispatched through the existing `Invoke-GSMAction` and an RCON command
+  box dispatched through `Send-GSMRCONCommand`, both inheriting the same
+  logging their console equivalents get. Launched as a blocking loop from a
+  new Menu.psm1 action (Ctrl+C to stop), not a background service, for v1.
+- Phase 4 narrowed further: the plugin marketplace is cut entirely, not
+  deferred - it doesn't fit an offline-first, zero-telemetry tool (section
+  10's security requirements rule out any external index/download source
+  a marketplace would need). Workshop support is deferred to a new Phase 5
+  (section 9) rather than dropped - Workshop is per-plugin functionality
+  (`SupportsWorkshop` already exists in the `Plugin.json` contract and
+  three of five Phase 1 plugins set it true), unrelated in scope to RCON or
+  the dashboard, and not yet designed. Phase 4 is now exactly two
+  deliverables: RCON console, then the web dashboard.
+- Phase 4 (`Core/RCON.psm1`, `Core/Dashboard.psm1`) is complete. 484/484
+  tests passing, PSScriptAnalyzer clean except the two pre-accepted
+  categories; one genuine finding (`PSAvoidUsingEmptyCatchBlock` in
+  `Dashboard.psm1`'s best-effort "send a 500 back to the client" catch)
+  was fixed by logging a warning instead of swallowing the exception.
+  `RCON.psm1` has no existing TCP-mocking precedent in this codebase, so
+  it introduces one: `New-GSMRCONConnection` is the module's sole seam,
+  swapped out in tests for an in-memory stream pair rather than a real
+  socket - the same shape of seam `Dashboard.psm1` then reuses for its own
+  `Invoke-GSMDashboardRequest` (an already-parsed Method/Path/Body in,
+  StatusCode/ContentType/Body out), so neither module's real network I/O
+  (a TCP connection, an `HttpListener` loop) is unit tested directly.
+  `Show-MainMenu`'s game/action prompt structure changed to accommodate
+  Dashboard: it sits as a top-level choice alongside "Exit", not inside
+  the per-game action list RCON Console was added to, since the dashboard
+  spans every instance rather than acting on one selected game.
+  `Dashboard.psm1` imports `Menu.psm1` (for `Invoke-GSMAction`) and
+  `RCON.psm1` (for `Send-GSMRCONCommand`) directly rather than assuming
+  either is already loaded globally, matching this codebase's established
+  convention of always importing what a module calls rather than relying
+  on ambient session state - which in turn means `Menu.psm1` cannot import
+  `Dashboard.psm1` at its own top level without creating a circular
+  `Import-Module -Force` loop, so that one import is done lazily inside
+  the "Dashboard" menu branch instead.

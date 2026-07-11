@@ -37,13 +37,18 @@ creates.
 - Don't touch other modules to make one module's tests pass, fix the module.
 - Keep changes surgical: if a task is "build Config.psm1", don't also edit
   Logging.psm1 unless the task requires it.
-- No telemetry, no network calls except to Steam's own CDN via SteamCMD, no
-  analytics, no cloud auth, ever.
+- No telemetry, no analytics, no cloud auth, ever. Network calls are limited
+  to Steam's own CDN via SteamCMD, RCON connections to the game server's own
+  port (Phase 4), and the web dashboard's HTTP listener bound to
+  `127.0.0.1` only (Phase 4) - nothing leaves the local machine.
 
 ## What not to add
 
-- No web dashboard, RCON, Discord, or Workshop code until Phase 4 is explicitly
-  started.
+- No web dashboard or RCON code until Phase 4 is explicitly started. Phase 4
+  is exactly these two deliverables now - Discord notifications are dropped
+  entirely (Marc doesn't plan to use it) and the plugin marketplace is cut
+  entirely (doesn't fit an offline-first, zero-telemetry tool). Workshop
+  support is deferred to a future Phase 5, not part of Phase 4.
 - No abstractions for games beyond Insurgency 2014 until a second plugin is
   actually requested.
 - No dependencies outside what ships with PowerShell 7+ and SteamCMD, unless

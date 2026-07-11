@@ -256,8 +256,10 @@ function Get-GSMServerHealthReportData {
     .EXAMPLE
         Get-GSMServerHealthReportData
     .NOTES
-        Not exported - internal to Core/Reports.psm1, reachable in tests
-        via Pester's InModuleScope.
+        Exported (in addition to New-GSMServerHealthReport) so
+        Core/Dashboard.psm1's polled JSON status endpoint can reuse this
+        same data-gathering instead of duplicating instance/system
+        discovery there (PRD section 13's Phase 4 decisions log).
     #>
     [CmdletBinding()]
     [OutputType([psobject])]
@@ -467,4 +469,4 @@ function New-GSMServerHealthReport {
     return $reportPath
 }
 
-Export-ModuleMember -Function New-GSMServerHealthReport
+Export-ModuleMember -Function New-GSMServerHealthReport, Get-GSMServerHealthReportData
