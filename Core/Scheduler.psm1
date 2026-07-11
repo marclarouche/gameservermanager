@@ -30,6 +30,29 @@
     "dispatched through whichever ProcessManager mode the instance is set
     to" automatically - that dispatch already lives inside Service.psm1
     itself, not duplicated here.
+
+    Phase 6 adds a third, optional trigger: a nightly Workshop refresh
+    (default 03:45, 15 minutes before the nightly restart, so a slow
+    refresh can't push into restart time), registered via
+    Register-GSMWorkshopRefreshSchedule rather than folded into
+    Register-GSMScheduledMaintenance - unlike restart/update-check, it
+    only applies to Workshop-capable instances with at least one
+    subscribed item, so it needs its own preconditions and is a normal
+    no-op (not an error) for every instance that doesn't meet them. It
+    calls Core/Workshop.psm1's Update-GSMWorkshopItems, which takes only
+    -FolderName (it reads WorkshopItems from that instance's own config
+    internally) - unlike Restart-GSMServer/Update-GSMServer, it has no use
+    for Executable/GetLaunchArgsFunctionName, so those became optional
+    parameters on the shared Get-GSMSchedulerMaintenanceCommandText/
+    Register-GSMSchedulerMaintenanceTask helpers rather than being given
+    fake placeholder values for this kind. Unregister-GSMScheduledMaintenance
+    and Get-GSMScheduledMaintenanceStatus fold WorkshopRefresh into their
+    existing three-kind loops rather than gaining a separate
+    Unregister-GSMWorkshopRefreshSchedule function - removal/status
+    reporting for a task that may or may not exist is already idempotent
+    per-task-name logic, so a fourth kind costs nothing there, and callers
+    get one single teardown/status entry point for an instance rather than
+    needing to remember a second one just for Workshop refresh.
 .NOTES
     GetLaunchArgsFunctionName isn't stored anywhere in Plugin.json or
     instance config; it's derived from the "Get-<FolderName>LaunchArgs"
@@ -54,6 +77,11 @@ Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'ServiceAccount.psm1') -
 # minutes apart so a nightly update check doesn't race a nightly restart.
 $script:GSMSchedulerDefaultRestartTime = '04:00'
 $script:GSMSchedulerDefaultUpdateCheckTime = '04:15'
+
+# Default applied when an instance's config omits WorkshopRefreshTime.
+# Deliberately before NightlyRestart's 04:00, not after, so a slow Workshop
+# refresh can't push into restart time.
+$script:GSMSchedulerDefaultWorkshopRefreshTime = '03:45'
 
 function Get-GSMSchedulerConfigPropertyValue {
     # Internal helper. Not exported: reads a property from a config psobject
@@ -124,7 +152,7 @@ function Get-GSMSchedulerTaskName {
         [string]$FolderName,
 
         [Parameter(Mandatory)]
-        [ValidateSet('NightlyRestart', 'NightlyUpdateCheck')]
+        [ValidateSet('NightlyRestart', 'NightlyUpdateCheck', 'WorkshopRefresh')]
         [string]$Kind
     )
 
@@ -138,17 +166,25 @@ function Get-GSMSchedulerMaintenanceCommandText {
     # operator, builds this string deliberately: the template's own
     # try/catch blocks use literal curly braces, which -f would misread as
     # format placeholders.
+    #
+    # Executable/GetLaunchArgsFunctionName are optional (unlike
+    # AccountName/ActionModulePath/ActionFunctionName): WorkshopRefresh's
+    # action function (Update-GSMWorkshopItems) takes only -FolderName, so
+    # there is no real value to supply for either - passing a fake
+    # placeholder string would be confusing to read later, so the
+    # WorkshopRefresh template simply never references those tokens
+    # instead.
     [CmdletBinding()]
     [OutputType([string])]
     param(
         [Parameter(Mandatory)]
         [string]$FolderName,
 
-        [Parameter(Mandatory)]
-        [string]$Executable,
+        [Parameter()]
+        [string]$Executable = '',
 
-        [Parameter(Mandatory)]
-        [string]$GetLaunchArgsFunctionName,
+        [Parameter()]
+        [string]$GetLaunchArgsFunctionName = '',
 
         [Parameter(Mandatory)]
         [string]$AccountName,
@@ -160,6 +196,7 @@ function Get-GSMSchedulerMaintenanceCommandText {
         [string]$ActionFunctionName,
 
         [Parameter(Mandatory)]
+        [ValidateSet('NightlyRestart', 'NightlyUpdateCheck', 'WorkshopRefresh')]
         [string]$Kind
     )
 
@@ -167,7 +204,26 @@ function Get-GSMSchedulerMaintenanceCommandText {
     $pluginLoaderPath = Join-Path -Path $rootPath -ChildPath 'Core/PluginLoader.psm1'
     $loggingPath = Join-Path -Path $rootPath -ChildPath 'Core/Logging.psm1'
 
-    $template = @'
+    $template = if ($Kind -eq 'WorkshopRefresh') {
+        @'
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+try {
+    Import-Module '__LOGGING__' -Force
+    Import-Module '__PLUGINLOADER__' -Force
+    Import-Module '__ACTIONMODULE__' -Force
+    Import-GSMPlugin -FolderName '__FOLDERNAME__'
+    __ACTIONFUNCTION__ -FolderName '__FOLDERNAME__' | Out-Null
+    Write-GSMLog -Level Info -Message "Scheduled __KIND__ succeeded for '__FOLDERNAME__'."
+}
+catch {
+    Write-GSMLog -Level Error -Message "Scheduled __KIND__ failed for '__FOLDERNAME__': $($_.Exception.Message)"
+    exit 1
+}
+'@
+    }
+    else {
+        @'
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 try {
@@ -183,6 +239,7 @@ catch {
     exit 1
 }
 '@
+    }
 
     return $template.
         Replace('__LOGGING__', $loggingPath).
@@ -223,6 +280,11 @@ function Register-GSMSchedulerMaintenanceTask {
     # Core/ProcessManager.psm1's Start-GSMServer always re-registering its
     # own Scheduled Task fresh rather than layering changes onto a stale
     # definition.
+    #
+    # Executable/GetLaunchArgsFunctionName are optional, not Mandatory: see
+    # Get-GSMSchedulerMaintenanceCommandText's identical .NOTES -
+    # Register-GSMWorkshopRefreshSchedule calls this without either, since
+    # Update-GSMWorkshopItems has no use for them.
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -243,11 +305,11 @@ function Register-GSMSchedulerMaintenanceTask {
         [Parameter(Mandatory)]
         [string]$ActionFunctionName,
 
-        [Parameter(Mandatory)]
-        [string]$Executable,
+        [Parameter()]
+        [string]$Executable = '',
 
-        [Parameter(Mandatory)]
-        [string]$GetLaunchArgsFunctionName,
+        [Parameter()]
+        [string]$GetLaunchArgsFunctionName = '',
 
         [Parameter(Mandatory)]
         [string]$AccountName,
@@ -383,16 +445,125 @@ function Register-GSMScheduledMaintenance {
     return $true
 }
 
+function Register-GSMWorkshopRefreshSchedule {
+    <#
+    .SYNOPSIS
+        Registers a nightly Workshop refresh Scheduled Task for a server
+        instance, if applicable.
+    .DESCRIPTION
+        Reads Plugins/<FolderName>/Plugin.json's SupportsWorkshop field; if
+        it's not true, registers nothing and returns $false (an Info log
+        line, not an error - CounterStrikeSource and L4D simply have
+        nothing to schedule). Reads Config/<FolderName>.json's
+        WorkshopItems array; if it's empty, also registers nothing and
+        returns $false (Info-logged) - there's nothing to refresh yet for
+        an instance with no subscribed Workshop items. Otherwise reads
+        WorkshopRefreshTime from config (defaulting to '03:45' when
+        absent) and registers "GSM-<FolderName>-WorkshopRefresh", which
+        calls Core/Workshop.psm1's Update-GSMWorkshopItems. Idempotent the
+        same way Register-GSMScheduledMaintenance's tasks are: calling
+        this again (e.g. after a new item is subscribed) replaces the
+        existing trigger rather than adding a second one.
+    .PARAMETER FolderName
+        The plugin's folder name under Plugins/ (e.g. 'Insurgency2014').
+    .PARAMETER AccountName
+        Name of GSM's local service account to run the scheduled task as.
+        Defaults to 'GSM-ServiceAccount', matching
+        Register-GSMScheduledMaintenance's parameter shape - not used by
+        Update-GSMWorkshopItems itself (it takes only -FolderName), only
+        by the Scheduled Task's own run-as identity and credential lookup.
+    .EXAMPLE
+        Register-GSMWorkshopRefreshSchedule -FolderName 'Insurgency2014'
+    .NOTES
+        Throws if Config/<FolderName>.json is missing, if Plugin.json is
+        missing/invalid, if WorkshopRefreshTime isn't a valid HH:mm value,
+        or if Register-ScheduledTask fails - the same failure modes
+        Register-GSMScheduledMaintenance has. Returning $false rather than
+        throwing for the two "nothing to schedule" cases (unsupported
+        game, no subscribed items) keeps this safe to call unconditionally
+        for every instance during a broader maintenance-setup pass,
+        without every caller needing to pre-check SupportsWorkshop or
+        WorkshopItems itself first.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$FolderName,
+
+        [Parameter()]
+        [string]$AccountName = 'GSM-ServiceAccount'
+    )
+
+    $rootPath = Get-GSMRootPath
+
+    $pluginJson = Get-GSMSchedulerPluginJson -FolderName $FolderName
+    if ($pluginJson.SupportsWorkshop -ne $true) {
+        Write-GSMLog -Level Info -Message "'$FolderName' does not support Steam Workshop; no Workshop refresh scheduled."
+        return $false
+    }
+
+    $configPath = Join-Path -Path $rootPath -ChildPath "Config/$FolderName.json"
+    if (-not (Test-Path -Path $configPath -PathType Leaf)) {
+        throw "No config found for '$FolderName' at '$configPath'. Run the Configure action first."
+    }
+    $config = Get-GSMConfig -Path $configPath
+
+    # Two stacked gotchas here, not one. First: @(...) around a possibly-
+    # $null property value would otherwise wrap $null into a one-element
+    # array containing $null, not an empty array - the same trap
+    # Core/Workshop.psm1's Get-GSMWorkshopItemsArray guards against.
+    # Second, easy to miss: "$workshopItems = if (...) { @() } else {...}"
+    # (the if/else's result captured as a single expression) enumerates an
+    # empty-array branch to zero pipeline objects, same as "return $array"
+    # does - it would silently reintroduce the first gotcha even with the
+    # $null-check in place. Using if/else as plain imperative statements,
+    # each assigning $workshopItems directly inside its own block, avoids
+    # both: a literal "$workshopItems = @()" assigned this way is a direct
+    # value assignment, not something PowerShell enumerates.
+    $workshopItemsValue = Get-GSMSchedulerConfigPropertyValue -Config $config -Name 'WorkshopItems'
+    if ($null -eq $workshopItemsValue) {
+        $workshopItems = [string[]]@()
+    }
+    else {
+        $workshopItems = [string[]]@($workshopItemsValue)
+    }
+
+    if ($workshopItems.Count -eq 0) {
+        Write-GSMLog -Level Info -Message "'$FolderName' has no subscribed Workshop items; no Workshop refresh scheduled."
+        return $false
+    }
+
+    $workshopRefreshTime = Get-GSMSchedulerConfigPropertyValue -Config $config -Name 'WorkshopRefreshTime'
+    if ([string]::IsNullOrWhiteSpace($workshopRefreshTime)) {
+        $workshopRefreshTime = $script:GSMSchedulerDefaultWorkshopRefreshTime
+    }
+
+    $workshopModulePath = Join-Path -Path $rootPath -ChildPath 'Core/Workshop.psm1'
+
+    $credential = Get-GSMServiceAccountCredential -AccountName $AccountName
+
+    Register-GSMSchedulerMaintenanceTask -FolderName $FolderName -Kind 'WorkshopRefresh' `
+        -TaskName (Get-GSMSchedulerTaskName -FolderName $FolderName -Kind 'WorkshopRefresh') `
+        -Time $workshopRefreshTime -ActionModulePath $workshopModulePath -ActionFunctionName 'Update-GSMWorkshopItems' `
+        -AccountName $AccountName -Credential $credential
+
+    return $true
+}
+
 function Unregister-GSMScheduledMaintenance {
     <#
     .SYNOPSIS
-        Removes a server instance's nightly restart and update-check
-        Scheduled Tasks.
+        Removes a server instance's nightly restart, update-check, and
+        Workshop refresh Scheduled Tasks.
     .DESCRIPTION
-        Removes "GSM-<FolderName>-NightlyRestart" and
-        "GSM-<FolderName>-NightlyUpdateCheck" if they exist. A no-op
-        (logged as info, not an error) for either task that isn't
-        registered.
+        Removes "GSM-<FolderName>-NightlyRestart",
+        "GSM-<FolderName>-NightlyUpdateCheck", and
+        "GSM-<FolderName>-WorkshopRefresh" if they exist. A no-op (logged
+        as info, not an error) for any task that isn't registered - safe
+        to call even for an instance that never had a Workshop refresh
+        task registered in the first place (CounterStrikeSource, L4D, or
+        any Workshop-capable instance with no subscribed items yet).
     .PARAMETER FolderName
         The plugin's folder name under Plugins/ (e.g. 'Insurgency2014').
     .EXAMPLE
@@ -400,7 +571,7 @@ function Unregister-GSMScheduledMaintenance {
     .NOTES
         Never throws. A failure removing a task that does exist is logged
         as a warning, not fatal, so one bad task doesn't block removal of
-        the other.
+        the others.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -411,7 +582,8 @@ function Unregister-GSMScheduledMaintenance {
 
     $taskNames = @(
         (Get-GSMSchedulerTaskName -FolderName $FolderName -Kind 'NightlyRestart'),
-        (Get-GSMSchedulerTaskName -FolderName $FolderName -Kind 'NightlyUpdateCheck')
+        (Get-GSMSchedulerTaskName -FolderName $FolderName -Kind 'NightlyUpdateCheck'),
+        (Get-GSMSchedulerTaskName -FolderName $FolderName -Kind 'WorkshopRefresh')
     )
 
     foreach ($taskName in $taskNames) {
@@ -437,15 +609,21 @@ function Unregister-GSMScheduledMaintenance {
 function Get-GSMScheduledMaintenanceStatus {
     <#
     .SYNOPSIS
-        Reports a server instance's nightly restart and update-check
-        Scheduled Task status.
+        Reports a server instance's nightly restart, update-check, and
+        Workshop refresh Scheduled Task status.
     .DESCRIPTION
         Returns one object per registered task ("GSM-<FolderName>-
-        NightlyRestart" and/or "GSM-<FolderName>-NightlyUpdateCheck") with
-        its Kind, State, NextRunTime, LastRunTime, and LastTaskResult (from
+        NightlyRestart", "GSM-<FolderName>-NightlyUpdateCheck", and/or
+        "GSM-<FolderName>-WorkshopRefresh") with its Kind, State,
+        NextRunTime, LastRunTime, and LastTaskResult (from
         Get-ScheduledTaskInfo). A task that isn't registered is simply
-        omitted, not reported as an error; an instance with neither task
-        registered returns an empty array.
+        omitted, not reported as an error; an instance with none of the
+        three registered returns an empty array. WorkshopRefresh only
+        ever appears here if Register-GSMWorkshopRefreshSchedule actually
+        registered it (Workshop-capable plugin, at least one subscribed
+        item) - there is no separate "not applicable" state, it's just
+        absent from the results the same way an un-registered
+        NightlyRestart would be.
     .PARAMETER FolderName
         The plugin's folder name under Plugins/ (e.g. 'Insurgency2014').
     .EXAMPLE
@@ -461,6 +639,7 @@ function Get-GSMScheduledMaintenanceStatus {
     $taskDefinitions = @(
         [PSCustomObject]@{ Kind = 'NightlyRestart'; TaskName = (Get-GSMSchedulerTaskName -FolderName $FolderName -Kind 'NightlyRestart') }
         [PSCustomObject]@{ Kind = 'NightlyUpdateCheck'; TaskName = (Get-GSMSchedulerTaskName -FolderName $FolderName -Kind 'NightlyUpdateCheck') }
+        [PSCustomObject]@{ Kind = 'WorkshopRefresh'; TaskName = (Get-GSMSchedulerTaskName -FolderName $FolderName -Kind 'WorkshopRefresh') }
     )
 
     $statuses = [System.Collections.Generic.List[psobject]]::new()
@@ -487,4 +666,4 @@ function Get-GSMScheduledMaintenanceStatus {
     return $statuses.ToArray()
 }
 
-Export-ModuleMember -Function Register-GSMScheduledMaintenance, Unregister-GSMScheduledMaintenance, Get-GSMScheduledMaintenanceStatus
+Export-ModuleMember -Function Register-GSMScheduledMaintenance, Unregister-GSMScheduledMaintenance, Get-GSMScheduledMaintenanceStatus, Register-GSMWorkshopRefreshSchedule

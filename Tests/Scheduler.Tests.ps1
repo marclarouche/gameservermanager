@@ -8,7 +8,10 @@ BeforeAll {
             [switch]$WithConfig,
             [switch]$WithoutPlugin,
             [string]$RestartTime,
-            [string]$UpdateCheckTime
+            [string]$UpdateCheckTime,
+            [bool]$SupportsWorkshop = $false,
+            [string[]]$WorkshopItems,
+            [string]$WorkshopRefreshTime
         )
 
         $root = Join-Path $TestDrive ('scheduler-root-' + [guid]::NewGuid().ToString('N'))
@@ -23,7 +26,7 @@ BeforeAll {
                 Engine           = 'Source'
                 Executable       = $Executable
                 DefaultPort      = 27015
-                SupportsWorkshop = $false
+                SupportsWorkshop = $SupportsWorkshop
                 SupportsRCON     = $true
             }
             $pluginJson | ConvertTo-Json | Set-Content -Path (Join-Path $root "Plugins/$FolderName/Plugin.json")
@@ -33,6 +36,13 @@ BeforeAll {
             $config = [ordered]@{ GameName = 'FakeGame'; AppID = '1' }
             if ($RestartTime) { $config['RestartTime'] = $RestartTime }
             if ($UpdateCheckTime) { $config['UpdateCheckTime'] = $UpdateCheckTime }
+            # ContainsKey, not just truthiness: an explicitly-passed empty
+            # array must still produce a real "WorkshopItems": [] field in
+            # the config (to exercise the empty-array-enumerates-to-null
+            # edge case), which a simple "if ($WorkshopItems)" truthiness
+            # check would silently skip.
+            if ($PSBoundParameters.ContainsKey('WorkshopItems')) { $config['WorkshopItems'] = @($WorkshopItems) }
+            if ($WorkshopRefreshTime) { $config['WorkshopRefreshTime'] = $WorkshopRefreshTime }
             $config | ConvertTo-Json | Set-Content -Path (Join-Path $root "Config/$FolderName.json")
         }
 
@@ -149,6 +159,106 @@ Describe 'Core/Scheduler.psm1' {
         }
     }
 
+    Context 'Register-GSMWorkshopRefreshSchedule - preconditions' {
+        BeforeEach {
+            Mock -ModuleName Scheduler -CommandName Register-ScheduledTask -MockWith { }
+        }
+
+        It 'returns $false and does not register when SupportsWorkshop is false' {
+            $fakeRoot = New-FakeGSMRootForScheduler -FolderName 'FakeGame' -WithConfig -SupportsWorkshop $false -WorkshopItems @('123')
+            Mock -ModuleName Scheduler -CommandName Get-GSMRootPath -MockWith { $fakeRoot }
+
+            $result = Register-GSMWorkshopRefreshSchedule -FolderName 'FakeGame'
+
+            $result | Should -Be $false
+            Should -Invoke -ModuleName Scheduler -CommandName Register-ScheduledTask -Times 0
+            Should -Invoke -ModuleName Scheduler -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Info' -and $Message -match 'does not support' }
+        }
+
+        It 'returns $false and does not register when WorkshopItems is an empty array' {
+            $fakeRoot = New-FakeGSMRootForScheduler -FolderName 'FakeGame' -WithConfig -SupportsWorkshop $true -WorkshopItems @()
+            Mock -ModuleName Scheduler -CommandName Get-GSMRootPath -MockWith { $fakeRoot }
+
+            $result = Register-GSMWorkshopRefreshSchedule -FolderName 'FakeGame'
+
+            $result | Should -Be $false
+            Should -Invoke -ModuleName Scheduler -CommandName Register-ScheduledTask -Times 0
+            Should -Invoke -ModuleName Scheduler -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Info' -and $Message -match 'no subscribed Workshop items' }
+        }
+
+        It 'returns $false and does not register when WorkshopItems is absent from config entirely' {
+            $fakeRoot = New-FakeGSMRootForScheduler -FolderName 'FakeGame' -WithConfig -SupportsWorkshop $true
+            Mock -ModuleName Scheduler -CommandName Get-GSMRootPath -MockWith { $fakeRoot }
+
+            $result = Register-GSMWorkshopRefreshSchedule -FolderName 'FakeGame'
+
+            $result | Should -Be $false
+            Should -Invoke -ModuleName Scheduler -CommandName Register-ScheduledTask -Times 0
+        }
+
+        It 'throws a clear error when Config/<FolderName>.json does not exist' {
+            $fakeRoot = New-FakeGSMRootForScheduler -FolderName 'FakeGame' -SupportsWorkshop $true
+            Mock -ModuleName Scheduler -CommandName Get-GSMRootPath -MockWith { $fakeRoot }
+
+            { Register-GSMWorkshopRefreshSchedule -FolderName 'FakeGame' } | Should -Throw '*Configure*'
+        }
+    }
+
+    Context 'Register-GSMWorkshopRefreshSchedule - happy path' {
+        BeforeEach {
+            $script:FakeRoot = New-FakeGSMRootForScheduler -FolderName 'FakeGame' -WithConfig -SupportsWorkshop $true -WorkshopItems @('123', '456')
+            Mock -ModuleName Scheduler -CommandName Get-GSMRootPath -MockWith { $script:FakeRoot }
+
+            $fakeCredential = [pscredential]::new('GSM-ServiceAccount', (New-TestSecureStringForScheduler -PlainText 'fakepassword'))
+            Mock -ModuleName Scheduler -CommandName Get-GSMServiceAccountCredential -MockWith { $fakeCredential }
+
+            Mock -ModuleName Scheduler -CommandName Unregister-ScheduledTask -MockWith { }
+            Mock -ModuleName Scheduler -CommandName New-ScheduledTaskAction -MockWith { ScheduledTasks\New-ScheduledTaskAction -Execute $Execute -Argument $Argument }
+            Mock -ModuleName Scheduler -CommandName New-ScheduledTaskTrigger -MockWith { ScheduledTasks\New-ScheduledTaskTrigger -Daily -At $At }
+            Mock -ModuleName Scheduler -CommandName New-ScheduledTaskSettingsSet -MockWith { ScheduledTasks\New-ScheduledTaskSettingsSet -ExecutionTimeLimit $ExecutionTimeLimit -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries }
+            Mock -ModuleName Scheduler -CommandName Register-ScheduledTask -MockWith { }
+        }
+
+        It 'registers the WorkshopRefresh task using the default 03:45 time when WorkshopRefreshTime is absent' {
+            $result = Register-GSMWorkshopRefreshSchedule -FolderName 'FakeGame'
+
+            $result | Should -Be $true
+            Should -Invoke -ModuleName Scheduler -CommandName Register-ScheduledTask -Times 1 -ParameterFilter { $TaskName -eq 'GSM-FakeGame-WorkshopRefresh' }
+            Should -Invoke -ModuleName Scheduler -CommandName New-ScheduledTaskTrigger -Times 1 -ParameterFilter { $At.ToString('HH:mm') -eq '03:45' }
+        }
+
+        It 'uses WorkshopRefreshTime from config when present' {
+            $script:FakeRoot = New-FakeGSMRootForScheduler -FolderName 'FakeGame' -WithConfig -SupportsWorkshop $true -WorkshopItems @('123') -WorkshopRefreshTime '02:00'
+            Mock -ModuleName Scheduler -CommandName Get-GSMRootPath -MockWith { $script:FakeRoot }
+
+            Register-GSMWorkshopRefreshSchedule -FolderName 'FakeGame' | Out-Null
+
+            Should -Invoke -ModuleName Scheduler -CommandName New-ScheduledTaskTrigger -Times 1 -ParameterFilter { $At.ToString('HH:mm') -eq '02:00' }
+        }
+
+        It 'registers using the service account credential and Limited run level' {
+            Register-GSMWorkshopRefreshSchedule -FolderName 'FakeGame' | Out-Null
+
+            Should -Invoke -ModuleName Scheduler -CommandName Register-ScheduledTask -Times 1 -ParameterFilter {
+                $User -eq 'GSM-ServiceAccount' -and $Password -eq 'fakepassword' -and $RunLevel -eq 'Limited'
+            }
+        }
+
+        It 'unregisters any pre-existing WorkshopRefresh task before registering fresh' {
+            Register-GSMWorkshopRefreshSchedule -FolderName 'FakeGame' | Out-Null
+
+            Should -Invoke -ModuleName Scheduler -CommandName Unregister-ScheduledTask -Times 1 -ParameterFilter { $TaskName -eq 'GSM-FakeGame-WorkshopRefresh' }
+        }
+
+        It 'throws and logs an error when Register-ScheduledTask fails' {
+            Mock -ModuleName Scheduler -CommandName Register-ScheduledTask -MockWith { throw 'simulated registration failure' }
+
+            { Register-GSMWorkshopRefreshSchedule -FolderName 'FakeGame' } | Should -Throw
+
+            Should -Invoke -ModuleName Scheduler -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Error' }
+        }
+    }
+
     Context 'Get-GSMSchedulerMaintenanceCommandText (internal)' {
         It 'builds command text that imports the plugin and calls the right dispatch function with the right identity' {
             InModuleScope Scheduler {
@@ -161,6 +271,22 @@ Describe 'Core/Scheduler.psm1' {
                 $commandText | Should -BeLike "*Import-GSMPlugin -FolderName 'FakeGame'*"
                 $commandText | Should -BeLike "*Restart-GSMServer -FolderName 'FakeGame' -Executable 'srcds.exe' -GetLaunchArgsFunctionName 'Get-FakeGameLaunchArgs' -AccountName 'GSM-ServiceAccount'*"
                 $commandText | Should -BeLike "*Import-Module 'C:\GSM\Core\Service.psm1'*"
+            }
+        }
+
+        It 'builds WorkshopRefresh command text calling Update-GSMWorkshopItems with only -FolderName' {
+            InModuleScope Scheduler {
+                Mock -CommandName Get-GSMRootPath -MockWith { 'C:\GSM' }
+
+                $commandText = Get-GSMSchedulerMaintenanceCommandText -FolderName 'FakeGame' -AccountName 'GSM-ServiceAccount' `
+                    -ActionModulePath 'C:\GSM\Core\Workshop.psm1' -ActionFunctionName 'Update-GSMWorkshopItems' -Kind 'WorkshopRefresh'
+
+                $commandText | Should -BeLike "*Import-GSMPlugin -FolderName 'FakeGame'*"
+                $commandText | Should -BeLike "*Update-GSMWorkshopItems -FolderName 'FakeGame' | Out-Null*"
+                $commandText | Should -Not -BeLike '*-Executable*'
+                $commandText | Should -Not -BeLike '*-GetLaunchArgsFunctionName*'
+                $commandText | Should -Not -BeLike '*-AccountName*'
+                $commandText | Should -BeLike "*Import-Module 'C:\GSM\Core\Workshop.psm1'*"
             }
         }
 
@@ -190,17 +316,33 @@ Describe 'Core/Scheduler.psm1' {
             Should -Invoke -ModuleName Scheduler -CommandName Unregister-ScheduledTask -Times 0
         }
 
-        It 'removes both tasks when they exist' {
+        It 'removes all three tasks when they exist, including WorkshopRefresh' {
             Mock -ModuleName Scheduler -CommandName Get-ScheduledTask -MockWith { [PSCustomObject]@{ TaskName = 'x' } }
             Mock -ModuleName Scheduler -CommandName Unregister-ScheduledTask -MockWith { }
 
             $result = Unregister-GSMScheduledMaintenance -FolderName 'FakeGame'
 
             $result | Should -Be $true
-            Should -Invoke -ModuleName Scheduler -CommandName Unregister-ScheduledTask -Times 2
+            Should -Invoke -ModuleName Scheduler -CommandName Unregister-ScheduledTask -Times 3
+            Should -Invoke -ModuleName Scheduler -CommandName Unregister-ScheduledTask -Times 1 -ParameterFilter { $TaskName -eq 'GSM-FakeGame-WorkshopRefresh' }
         }
 
-        It 'warns rather than throws when removing one task fails, and still processes the other' {
+        It 'is a no-op for WorkshopRefresh specifically when only it is unregistered' {
+            Mock -ModuleName Scheduler -CommandName Get-ScheduledTask -MockWith {
+                param($TaskName)
+                if ($TaskName -eq 'GSM-FakeGame-WorkshopRefresh') { return $null }
+                return [PSCustomObject]@{ TaskName = $TaskName }
+            }
+            Mock -ModuleName Scheduler -CommandName Unregister-ScheduledTask -MockWith { }
+
+            $result = Unregister-GSMScheduledMaintenance -FolderName 'FakeGame'
+
+            $result | Should -Be $true
+            Should -Invoke -ModuleName Scheduler -CommandName Unregister-ScheduledTask -Times 2
+            Should -Invoke -ModuleName Scheduler -CommandName Unregister-ScheduledTask -Times 0 -ParameterFilter { $TaskName -eq 'GSM-FakeGame-WorkshopRefresh' }
+        }
+
+        It 'warns rather than throws when removing one task fails, and still processes the others' {
             Mock -ModuleName Scheduler -CommandName Get-ScheduledTask -MockWith { [PSCustomObject]@{ TaskName = 'x' } }
             Mock -ModuleName Scheduler -CommandName Unregister-ScheduledTask -MockWith {
                 param($TaskName)
@@ -212,7 +354,7 @@ Describe 'Core/Scheduler.psm1' {
             { Unregister-GSMScheduledMaintenance -FolderName 'FakeGame' } | Should -Not -Throw
 
             Should -Invoke -ModuleName Scheduler -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Warning' }
-            Should -Invoke -ModuleName Scheduler -CommandName Unregister-ScheduledTask -Times 2
+            Should -Invoke -ModuleName Scheduler -CommandName Unregister-ScheduledTask -Times 3
         }
     }
 
@@ -225,7 +367,7 @@ Describe 'Core/Scheduler.psm1' {
             $result.Count | Should -Be 0
         }
 
-        It 'returns one status object per registered task' {
+        It 'returns one status object per registered task, including WorkshopRefresh' {
             Mock -ModuleName Scheduler -CommandName Get-ScheduledTask -MockWith {
                 param($TaskName)
                 [PSCustomObject]@{ TaskName = $TaskName; State = 'Ready' }
@@ -236,10 +378,27 @@ Describe 'Core/Scheduler.psm1' {
 
             $result = @(Get-GSMScheduledMaintenanceStatus -FolderName 'FakeGame')
 
-            $result.Count | Should -Be 2
+            $result.Count | Should -Be 3
             ($result | Where-Object { $_.Kind -eq 'NightlyRestart' }).TaskName | Should -Be 'GSM-FakeGame-NightlyRestart'
             ($result | Where-Object { $_.Kind -eq 'NightlyUpdateCheck' }).State | Should -Be 'Ready'
             ($result | Where-Object { $_.Kind -eq 'NightlyRestart' }).LastTaskResult | Should -Be 0
+            ($result | Where-Object { $_.Kind -eq 'WorkshopRefresh' }).TaskName | Should -Be 'GSM-FakeGame-WorkshopRefresh'
+        }
+
+        It 'omits WorkshopRefresh when only it is not registered' {
+            Mock -ModuleName Scheduler -CommandName Get-ScheduledTask -MockWith {
+                param($TaskName)
+                if ($TaskName -eq 'GSM-FakeGame-WorkshopRefresh') { return $null }
+                return [PSCustomObject]@{ TaskName = $TaskName; State = 'Ready' }
+            }
+            Mock -ModuleName Scheduler -CommandName Get-ScheduledTaskInfo -MockWith {
+                [PSCustomObject]@{ NextRunTime = $null; LastRunTime = $null; LastTaskResult = 0 }
+            }
+
+            $result = @(Get-GSMScheduledMaintenanceStatus -FolderName 'FakeGame')
+
+            $result.Count | Should -Be 2
+            $result.Kind | Should -Not -Contain 'WorkshopRefresh'
         }
     }
 }
