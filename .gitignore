@@ -12,3 +12,4 @@ SteamCMD/*
 !SteamCMD/.gitkeep
 Tools/*
 !Tools/.gitkeep
+Build/
