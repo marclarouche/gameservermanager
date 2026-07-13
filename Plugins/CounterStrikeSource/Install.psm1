@@ -31,10 +31,11 @@ function Install-CounterStrikeSourceServer {
     .EXAMPLE
         Install-CounterStrikeSourceServer
     .NOTES
-        Throws if SteamCMD isn't installed yet (Update-SteamApp's own
-        check) or if the steamcmd.exe process exits non-zero. Callers must
-        run Install-SteamCMD first; this function does not install SteamCMD
-        itself.
+        Bootstraps SteamCMD first if it isn't already present (via
+        Test-SteamCMDPresent / Install-SteamCMD), mirroring how
+        Core/Service.psm1's Install-GSMServerService bootstraps NSSM on
+        first use. Throws if SteamCMD can't be installed or if the
+        steamcmd.exe process exits non-zero.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -43,6 +44,10 @@ function Install-CounterStrikeSourceServer {
     $installDirectory = Join-Path -Path (Get-GSMRootPath) -ChildPath 'Servers/CounterStrikeSource'
 
     try {
+        if (-not (Test-SteamCMDPresent)) {
+            Install-SteamCMD | Out-Null
+        }
+
         Update-SteamApp -AppID $script:CounterStrikeSourceAppID -InstallDirectory $installDirectory
     }
     catch {

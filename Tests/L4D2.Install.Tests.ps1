@@ -16,6 +16,11 @@ Describe 'Plugins/L4D2/Install.psm1' {
             Mock -ModuleName Install -CommandName Get-GSMRootPath -MockWith { 'D:\Fake\GSM' }
             Mock -ModuleName Install -CommandName Update-SteamApp -MockWith { }
             Mock -ModuleName Install -CommandName Write-GSMLog -MockWith { }
+            # SteamCMD present by default, so the bootstrap guard is skipped and
+            # these tests exercise the same path as before it was added; the
+            # "bootstraps SteamCMD" test below flips this to $false.
+            Mock -ModuleName Install -CommandName Test-SteamCMDPresent -MockWith { $true }
+            Mock -ModuleName Install -CommandName Install-SteamCMD -MockWith { }
         }
 
         It 'calls Update-SteamApp with AppID 222860 and the Servers/L4D2 install directory' {
@@ -45,6 +50,21 @@ Describe 'Plugins/L4D2/Install.psm1' {
             { Install-L4D2Server } | Should -Throw '*simulated steamcmd failure*'
 
             Should -Invoke -ModuleName Install -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Error' }
+        }
+
+        It 'bootstraps SteamCMD via Install-SteamCMD when it is not already present' {
+            Mock -ModuleName Install -CommandName Test-SteamCMDPresent -MockWith { $false }
+
+            Install-L4D2Server
+
+            Should -Invoke -ModuleName Install -CommandName Install-SteamCMD -Times 1
+            Should -Invoke -ModuleName Install -CommandName Update-SteamApp -Times 1
+        }
+
+        It 'does not reinstall SteamCMD when it is already present' {
+            Install-L4D2Server | Out-Null
+
+            Should -Invoke -ModuleName Install -CommandName Install-SteamCMD -Times 0
         }
     }
 

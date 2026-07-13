@@ -16,6 +16,11 @@ Describe 'Plugins/Insurgency2014/Install.psm1' {
             Mock -ModuleName Install -CommandName Get-GSMRootPath -MockWith { 'D:\Fake\GSM' }
             Mock -ModuleName Install -CommandName Update-SteamApp -MockWith { }
             Mock -ModuleName Install -CommandName Write-GSMLog -MockWith { }
+            # SteamCMD present by default, so the bootstrap guard is skipped and
+            # these tests exercise the same path as before it was added; the
+            # "bootstraps SteamCMD" test below flips this to $false.
+            Mock -ModuleName Install -CommandName Test-SteamCMDPresent -MockWith { $true }
+            Mock -ModuleName Install -CommandName Install-SteamCMD -MockWith { }
         }
 
         It 'calls Update-SteamApp with AppID 237410 and the Servers/Insurgency2014 install directory' {
@@ -45,6 +50,21 @@ Describe 'Plugins/Insurgency2014/Install.psm1' {
             { Install-Insurgency2014Server } | Should -Throw '*simulated steamcmd failure*'
 
             Should -Invoke -ModuleName Install -CommandName Write-GSMLog -Times 1 -ParameterFilter { $Level -eq 'Error' }
+        }
+
+        It 'bootstraps SteamCMD via Install-SteamCMD when it is not already present' {
+            Mock -ModuleName Install -CommandName Test-SteamCMDPresent -MockWith { $false }
+
+            Install-Insurgency2014Server
+
+            Should -Invoke -ModuleName Install -CommandName Install-SteamCMD -Times 1
+            Should -Invoke -ModuleName Install -CommandName Update-SteamApp -Times 1
+        }
+
+        It 'does not reinstall SteamCMD when it is already present' {
+            Install-Insurgency2014Server | Out-Null
+
+            Should -Invoke -ModuleName Install -CommandName Install-SteamCMD -Times 0
         }
     }
 
