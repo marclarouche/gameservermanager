@@ -47,19 +47,8 @@ param()
 Set-StrictMode -Version Latest
 
 
-# Logging.psm1 is imported first, Utilities.psm1 second - the reverse of
-# every Core/*.psm1 module's own import order. Core/Logging.psm1 itself
-# does `Import-Module Utilities.psm1 -Force` internally; if Utilities.psm1
-# were imported here first, that internal reimport would reload the
-# already-loaded module from within Logging's own module scope, which
-# converts it from a global module into one nested/private to Logging -
-# unregistering Get-GSMRootPath from the global scope this script itself
-# calls it from. Every other module in this repo is unaffected by this
-# because they only ever call Get-GSMRootPath from within their own
-# already-private module scope, never from a plain top-level script scope
-# the way this one does.
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Core/Logging.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Core/Utilities.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Core/Utilities.psm1')
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Core/Logging.psm1')
 
 function Get-GSMPackageVersion {
     # Internal helper (script-scoped, not exported - this is a script, not a

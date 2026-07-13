@@ -21,8 +21,8 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1')
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1')
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/SteamCMD.psm1') -Force
 
 # This plugin's Steam dedicated server AppID (matches Plugin.json).

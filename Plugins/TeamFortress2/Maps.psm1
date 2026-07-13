@@ -53,8 +53,8 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1')
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1')
 
 # Curated subset of long-standing, Valve-developed Team Fortress 2 stock
 # maps (internal map-file identifiers, lowercase), one representative per

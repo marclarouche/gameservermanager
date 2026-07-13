@@ -9,7 +9,7 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Utilities.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Utilities.psm1')
 
 # Default log directory, resolved from the repo root via Get-GSMRootPath so no
 # absolute path is baked in. Callers can override via -LogDirectory.

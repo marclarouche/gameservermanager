@@ -18,8 +18,8 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1')
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1')
 
 # Confirmed official Insurgency (2014) stock maps, as internal map-file
 # identifiers (lowercase, no spaces): Market, Siege, Contact, Uprising,

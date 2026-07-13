@@ -65,8 +65,8 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1')
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1')
 
 # Confirmed official Left 4 Dead (2008) campaign maps, as internal map-file
 # identifiers (lowercase), grouped by campaign:

@@ -10,8 +10,8 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Utilities.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Logging.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Utilities.psm1')
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Logging.psm1')
 
 function Test-SteamCMDPresent {
     <#

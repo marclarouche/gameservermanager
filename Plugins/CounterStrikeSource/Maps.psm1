@@ -62,8 +62,8 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Utilities.psm1')
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '../../Core/Logging.psm1')
 
 # Confirmed official Counter-Strike: Source stock maps, as internal map-file
 # identifiers (lowercase), grouped by objective type:

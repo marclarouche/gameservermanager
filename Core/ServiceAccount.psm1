@@ -22,8 +22,8 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Utilities.psm1') -Force
-Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Logging.psm1') -Force
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Utilities.psm1')
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Logging.psm1')
 
 # Folders the service account needs Modify (not Full Control) access to.
 # 'Servers' holds each plugin's installed game files, which the account
