@@ -160,9 +160,15 @@ function Update-SteamApp {
 
     $steamCmdExePath = Join-Path -Path (Get-GSMRootPath) -ChildPath 'SteamCMD/steamcmd.exe'
 
+    # +force_install_dir MUST precede +login: SteamCMD applies the install
+    # directory only if it is set before logon, and otherwise fails the app
+    # install with "Please use force_install_dir before logon!" and exit
+    # code 7. This ordering can't be caught by a mocked test (which never
+    # launches the real steamcmd.exe); it was found by the Phase 6
+    # clean-install verification against a real install.
     $arguments = @(
-        '+login', 'anonymous',
         '+force_install_dir', $InstallDirectory,
+        '+login', 'anonymous',
         '+app_update', $AppID, 'validate',
         '+quit'
     )

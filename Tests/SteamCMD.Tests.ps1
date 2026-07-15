@@ -116,11 +116,13 @@ Describe 'Core/SteamCMD.psm1' {
             }
         }
 
-        It 'builds the correct steamcmd.exe arguments' {
+        It 'builds the correct steamcmd.exe arguments with force_install_dir before login' {
             Update-SteamApp -AppID '237410' -InstallDirectory 'D:\Fake\Insurgency2014'
 
+            # +force_install_dir must come before +login, or SteamCMD fails
+            # the install with exit code 7 (see Update-SteamApp's own comment).
             Should -Invoke -ModuleName SteamCMD -CommandName Start-Process -Times 1 -ParameterFilter {
-                ($ArgumentList -join '|') -eq (@('+login', 'anonymous', '+force_install_dir', 'D:\Fake\Insurgency2014', '+app_update', '237410', 'validate', '+quit') -join '|')
+                ($ArgumentList -join '|') -eq (@('+force_install_dir', 'D:\Fake\Insurgency2014', '+login', 'anonymous', '+app_update', '237410', 'validate', '+quit') -join '|')
             }
         }
 
