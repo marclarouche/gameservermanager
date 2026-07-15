@@ -2,6 +2,64 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-15
+
+### Status
+Phase 6 (packaging + deployment hardening) complete - stable release.
+558/558 tests passing via `Tests/Run-AllTests.ps1`, PSScriptAnalyzer clean
+except the two pre-accepted `PSUseShouldProcessForStateChangingFunctions`
+and `PSUseSingularNouns` categories. `Docs/CleanInstallVerification.md`'s
+full Start/Stop/Restart cycle passed against a real installed instance on
+a genuinely clean machine (`E:\GSM-Test`) for the first time since Phase 2
+- every prior verification of this code path was against mocked cmdlets.
+
+### Added
+- `Build-GSMPackage.ps1`: builds a distributable `Build/GameServerManager-v<version>.zip`
+  from a clean copy of `GSM.ps1`, `Core/`, `Plugins/`, the SteamCMD/NSSM
+  pinned-hash seed config, and empty runtime folders - excludes `Tests/`,
+  `.git/`, `Docs/`, `.claude/`. Prints a manifest of everything included so
+  a bad include/exclude list is obvious immediately.
+- `Docs/CleanInstallVerification.md`: the manual checklist that ran the
+  first real (non-mocked) Start/Stop/Restart verification, deferred since
+  Phase 2.
+
+### Fixed
+- **Live crash in the interactive menu**: every `Core/*.psm1` module and
+  plugin file did `Import-Module ...Utilities.psm1 -Force` /
+  `...Logging.psm1 -Force` at its own top. Repeated `-Force` reimports of
+  the same shared dependency module across a long-lived session silently
+  invalidate other already-loaded modules' compiled references to it (e.g.
+  `Core/PluginLoader.psm1`'s `Find-GSMPlugins` default parameter value) -
+  confirmed at exactly 2 `Invoke-GSMAction` dispatches in one session,
+  regardless of plugin or action, crashing the whole process with
+  `Get-GSMRootPath: term not recognized` on the third. Fixed by dropping
+  `-Force` from all 53 occurrences across 27 files; re-importing an
+  already-loaded module without it safely reuses the existing instance.
+- **SteamCMD never actually installed itself**: `Install-SteamCMD` was
+  referenced only in docstrings, never called anywhere in the product, so
+  every first Install on a clean machine failed with "SteamCMD is not
+  installed." Each plugin's `Install-<Game>Server` now bootstraps SteamCMD
+  first if absent, mirroring how `Install-GSMServerService` already
+  bootstraps NSSM.
+- **SteamCMD argument order**: `Update-SteamApp` built its command as
+  `+login anonymous` before `+force_install_dir`; SteamCMD requires the
+  reverse, failing otherwise with "Please use force_install_dir before
+  logon!" (exit code 7). A mocked test had actually codified the wrong
+  order - not catchable without launching the real `steamcmd.exe`.
+- **Service account never actually provisioned**: `New-GSMServiceAccount`
+  and `Set-GSMServiceAccountRights` were likewise never called anywhere in
+  the product, so every first Start failed with "No stored credential
+  found... Run New-GSMServiceAccount first." `Install-GSMServerService` now
+  bootstraps the account and its rights first if not already fully set up.
+- **NSSM `ObjectName` rejected a valid local account**: Windows'
+  `ChangeServiceConfig` (what NSSM's `set ObjectName` calls internally)
+  rejects a bare local account name with "The account name is invalid or
+  does not exist, or the password is invalid," even though the account
+  genuinely exists - it needs the `.\` local-machine qualifier. Qualified
+  only at this call site, not on the shared credential object, since
+  `Core/ProcessManager.psm1`'s Scheduled-Task backend consumes the same
+  credential without this requirement.
+
 ## [0.5.0-alpha] - 2026-07-11
 
 ### Status

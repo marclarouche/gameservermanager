@@ -388,3 +388,22 @@ needed for either (PRD section 13 decisions log).
   `Dashboard.psm1` at its own top level without creating a circular
   `Import-Module -Force` loop, so that one import is done lazily inside
   the "Dashboard" menu branch instead.
+- Phase 6 (packaging + deployment hardening) is complete; v1.0.0 tagged as
+  the stable release per this section's own milestone table. Two
+  deliverables: `Build-GSMPackage.ps1` (a distributable release zip) and
+  `Docs/CleanInstallVerification.md` (the first-ever real, non-mocked
+  Start/Stop/Restart verification, deferred since Phase 2 - every prior
+  test of that path was against mocked NSSM/SteamCMD/secedit calls).
+  Running that checklist against a genuinely clean machine surfaced four
+  real, previously-shipped bugs no mocked test could have caught, all
+  fixed as part of this phase: a live interactive-session crash from
+  repeated `Import-Module -Force` on shared `Utilities.psm1`/`Logging.psm1`
+  corrupting other modules' already-compiled references to them; SteamCMD
+  and the service account both having full provisioning functions
+  (`Install-SteamCMD`, `New-GSMServiceAccount`/`Set-GSMServiceAccountRights`)
+  that existed but were never actually called anywhere in the product, so
+  every fresh-machine first Install/Start failed; SteamCMD's
+  `+force_install_dir`/`+login` argument order being backwards (SteamCMD
+  requires the former first); and NSSM's `ObjectName` rejecting a bare
+  local account name, requiring a `.\` qualifier. See `CHANGELOG.md`'s
+  `[1.0.0]` entry for the full list with fix details.

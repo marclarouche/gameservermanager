@@ -14,6 +14,30 @@
 
 ## Prerequisites
 
+### 0. Rebuild and redeploy the package after ANY code change
+
+The package is a point-in-time snapshot. An extracted `GSM-Test` copy does
+**not** pick up edits to the dev tree - fixes only reach it when the package
+is rebuilt *and* re-extracted. Running the checklist against a stale
+extraction tests old code and produces a meaningless result (this has
+already burned one run: a SteamCMD-bootstrap fix looked like it "didn't
+work" because the deployed zip predated it). So before every run, from the
+dev checkout:
+
+```powershell
+cd D:\Projects\GSM\GameServerManager
+./Build-GSMPackage.ps1                       # rebuild from the current tree
+Remove-Item -Recurse -Force E:\GSM-Test      # wipe the previous extraction
+New-Item -ItemType Directory -Path E:\GSM-Test | Out-Null
+Expand-Archive -Path .\Build\GameServerManager-v<version>.zip -DestinationPath E:\GSM-Test
+```
+
+Prefer building from a committed tree, so the package corresponds to a known
+commit rather than uncommitted working-tree state. Confirm the deployed code
+actually contains your change before trusting a run - e.g.
+`Select-String -Path E:\GSM-Test\Plugins\L4D\Install.psm1 -Pattern 'Test-SteamCMDPresent'`
+should find the bootstrap guard.
+
 ### 1. A fresh target path
 
 Pick a folder that has **never** had GSM unzipped, run, or configured into it
@@ -100,25 +124,54 @@ Run every step from an **elevated** PowerShell 7+ session (required by
 | 12 | `Get-Process -Name srcds -ErrorAction SilentlyContinue` | A process is listed again |
 | 13 | `Get-NetTCPConnection -LocalPort <DefaultPort from step 4> -State Listen -ErrorAction SilentlyContinue` | The configured port is listening again |
 
+## Troubleshooting
+
+**Install fails with SteamCMD state `0x602` ("Corrupt update files") after a
+long download, e.g. a validation log line like**
+`Validation: N chunks corrupt of M total in file "..."` **followed by**
+`update canceled : Staged file validation failed`**:** this is transient
+Steam CDN corruption on a large download, not a GSM bug - the `validate`
+flag in `Update-SteamApp` caught it correctly rather than silently leaving
+a broken install. The partial download is staged under
+`Servers/<FolderName>/steamapps/downloading/<AppID>/`, not lost. Simply
+re-run the Install action: SteamCMD resumes from the staged files and
+re-downloads only the corrupt chunk(s), not the whole game. If it fails
+identically on a second attempt, delete that `downloading/<AppID>` folder
+and retry from a clean state.
+
 ## Results
 
 Fill in `Actual` and `Pass/Fail` for every row before considering this
 checklist complete. A single `Fail` blocks Phase 6 close-out.
 
+**Run by:** Marc Larouche, with Claude Code diagnosing/fixing between
+attempts. **Date:** 2026-07-13 to 2026-07-15. **Target:** `E:\GSM-Test`.
+**Instance tested:** Insurgency2014 (Map: Tell, Mode: Checkpoint).
+
 | # | Step | Expected | Actual | Pass/Fail |
 |---|------|----------|--------|-----------|
-| 1 | Extract package | Files present | | |
-| 3 | Configure | Exit 0, `Config/Insurgency2014.json` created | | |
-| 4 | Read configured port | Port value recorded: _____ | | |
-| 5 | Install | Exit 0, `srcds.exe` installed | | |
-| 6 | Start | Exit 0 | | |
-| 7 | Process check (after Start) | Process running | | |
-| 8 | Port check (after Start) | Configured port listening | | |
-| 9 | Stop | Exit 0 | | |
-| 10 | Process check (after Stop) | No process running | | |
-| 11 | Restart | Exit 0 | | |
-| 12 | Process check (after Restart) | Process running | | |
-| 13 | Port check (after Restart) | Configured port listening | | |
+| 1 | Extract package | Files present | Files present | Pass |
+| 3 | Configure | Exit 0, `Config/Insurgency2014.json` created | Exit 0, file created | Pass |
+| 4 | Read configured port | Port value recorded: _____ | `27015` | Pass |
+| 5 | Install | Exit 0, `srcds.exe` installed | Exit 0 after 2 fixes (SteamCMD auto-bootstrap; `+force_install_dir` before `+login`) and one transient CDN corruption (resolved by re-running Install, per Troubleshooting above); `srcds.exe` present at `Servers/Insurgency2014/srcds.exe` | Pass |
+| 6 | Start | Exit 0 | Exit 0 after 2 fixes (service account auto-bootstrap via `New-GSMServiceAccount`/`Set-GSMServiceAccountRights`; NSSM's `ObjectName` needs the `.\` local-account qualifier, a bare name is rejected by `ChangeServiceConfig`) | Pass |
+| 7 | Process check (after Start) | Process running | `srcds` process running (verified via `Get-Process`) | Pass |
+| 8 | Port check (after Start) | Configured port listening | Port 27015 listening on TCP and UDP (verified via `Get-NetTCPConnection`/`Get-NetUDPEndpoint`); service confirmed running as `.\GSM-ServiceAccount`, not `LocalSystem` | Pass |
+| 9 | Stop | Exit 0 | Exit 0 (`STOP: The operation completed successfully`) | Pass |
+| 10 | Process check (after Stop) | No process running | Confirmed via NSSM's own subsequent Restart output (`STOP: The service has not been started` - only printed when NSSM's stop sub-step finds it already stopped) | Pass |
+| 11 | Restart | Exit 0 | Exit 0, full re-registration cycle succeeded cleanly (no errors) | Pass |
+| 12 | Process check (after Restart) | Process running | New `srcds` process (different PID than pre-Restart, confirming a genuine stop/start rather than the old process persisting) | Pass |
+| 13 | Port check (after Restart) | Configured port listening | Port 27015 listening again on TCP and UDP | Pass |
+
+**All steps pass.** Four real product bugs were found and fixed via this
+run (none catchable by mocked tests, since none launch real `steamcmd.exe`/
+NSSM or run a multi-dispatch session): the `Utilities.psm1`/`Logging.psm1`
+`-Force` import crash (fixed 2026-07-13, see
+`Docs/CleanInstallVerification.md`'s git history and
+`Core/*.psm1`'s import lines), the missing SteamCMD bootstrap, the
+`+force_install_dir`/`+login` argument order, and the missing
+ServiceAccount bootstrap plus its `.\` qualifier requirement. See
+`CHANGELOG.md` and `PRD.md` section 13 for the consolidated record.
 
 **Run by:** _____________________ **Date:** _____________________
 
