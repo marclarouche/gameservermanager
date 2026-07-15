@@ -189,15 +189,20 @@ function Install-GSMServerService {
         Registers (or re-registers) FolderName's game server as an
         NSSM-managed Windows Service.
     .DESCRIPTION
-        Installs NSSM first if it isn't already present. Removes any
-        existing service of the same name, then runs `nssm install` with
-        ExecutablePath, followed by `nssm set` calls for AppParameters (the
-        launch arguments, space-joined), AppDirectory, and ObjectName (the
-        service account identity) - always re-applied from scratch, so the
-        service reflects the current executable, launch arguments, and
-        account rather than whatever was true the last time it was
-        installed. Mirrors Core/ProcessManager.psm1's Start-GSMServer always
-        re-registering its Scheduled Task fresh on every start.
+        Installs NSSM first if it isn't already present, and provisions
+        AccountName (via Test-GSMServiceAccount / New-GSMServiceAccount /
+        Set-GSMServiceAccountRights) first if it doesn't already exist or
+        doesn't yet have its expected rights - neither NSSM nor the service
+        account bootstraps itself otherwise, and every real Start on a
+        fresh machine needs both. Removes any existing service of the same
+        name, then runs `nssm install` with ExecutablePath, followed by
+        `nssm set` calls for AppParameters (the launch arguments,
+        space-joined), AppDirectory, and ObjectName (the service account
+        identity) - always re-applied from scratch, so the service reflects
+        the current executable, launch arguments, and account rather than
+        whatever was true the last time it was installed. Mirrors
+        Core/ProcessManager.psm1's Start-GSMServer always re-registering
+        its Scheduled Task fresh on every start.
     .PARAMETER FolderName
         The plugin's folder name under Plugins/ (e.g. 'Insurgency2014').
     .PARAMETER ExecutablePath
@@ -241,6 +246,17 @@ function Install-GSMServerService {
         Install-NSSM | Out-Null
     }
 
+    # Test-GSMServiceAccount logs its own Error-level messages for whichever
+    # of its five conditions aren't met yet - expected and harmless the
+    # first time this runs against a fresh account, since that's exactly
+    # what "needs provisioning" looks like. New-GSMServiceAccount itself
+    # requires elevation and throws a clear error if the session isn't
+    # elevated; Start already requires elevation for this reason.
+    if (-not (Test-GSMServiceAccount -AccountName $AccountName)) {
+        New-GSMServiceAccount -AccountName $AccountName | Out-Null
+        Set-GSMServiceAccountRights -AccountName $AccountName
+    }
+
     $serviceName = Get-GSMServiceName -FolderName $FolderName
 
     # Idempotent removal first, so every install below reflects the current
@@ -270,7 +286,17 @@ function Install-GSMServerService {
     $credential = Get-GSMServiceAccountCredential -AccountName $AccountName
     $plainPassword = $credential.GetNetworkCredential().Password
     try {
-        $objectNameResult = Invoke-GSMNSSMCommand -ArgumentList @('set', $serviceName, 'ObjectName', $credential.UserName, $plainPassword)
+        # NSSM's own `set ObjectName` call maps to the Windows
+        # ChangeServiceConfig API, which - unlike Get-GSMServiceAccountCredential's
+        # other consumer, Core/ProcessManager.psm1's Register-ScheduledTask -
+        # rejects a bare local account name with "The account name is
+        # invalid or does not exist, or the password is invalid," even
+        # though the account genuinely exists. It needs the ".\" local-machine
+        # qualifier; qualified only here, not on the shared credential
+        # object itself, since that would also affect the ScheduledTask
+        # path, which doesn't have this requirement.
+        $qualifiedAccountName = ".\$($credential.UserName)"
+        $objectNameResult = Invoke-GSMNSSMCommand -ArgumentList @('set', $serviceName, 'ObjectName', $qualifiedAccountName, $plainPassword)
         if ($objectNameResult.ExitCode -ne 0) {
             Write-GSMLog -Level Error -Message "nssm set ObjectName failed for '$serviceName' (exit code $($objectNameResult.ExitCode))."
             throw "Failed to set the service account identity for NSSM service '$serviceName' (nssm exit code $($objectNameResult.ExitCode))."

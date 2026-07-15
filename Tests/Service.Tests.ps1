@@ -58,6 +58,13 @@ Describe 'Core/Service.psm1' {
         Mock -ModuleName Service -CommandName Write-GSMLog -MockWith { }
         Mock -ModuleName Service -CommandName Test-NSSMPresent -MockWith { $true }
 
+        # Service account present and fully provisioned by default, so
+        # existing tests exercise the same path as before this bootstrap
+        # existed; the two tests below flip this to $false.
+        Mock -ModuleName Service -CommandName Test-GSMServiceAccount -MockWith { $true }
+        Mock -ModuleName Service -CommandName New-GSMServiceAccount -MockWith { $true }
+        Mock -ModuleName Service -CommandName Set-GSMServiceAccountRights -MockWith { }
+
         # Default nssm.exe stand-in: every Start-Process call "succeeds"
         # with exit code 0, and (only relevant to `status` calls, which
         # pass -RedirectStandardOutput) writes $script:FakeNSSMStatusOutput
@@ -151,11 +158,14 @@ Describe 'Core/Service.psm1' {
             }
         }
 
-        It 'sets ObjectName to the service account credential' {
+        It 'sets ObjectName to the service account credential, qualified with the local-machine ".\" prefix' {
             Install-GSMServerService -FolderName 'FakeGame' -ExecutablePath 'D:\Fake\srcds.exe' -InstallDirectory 'D:\Fake' -AccountName 'GSM-ServiceAccount' | Out-Null
 
+            # ChangeServiceConfig (what nssm's own `set ObjectName` maps to)
+            # rejects a bare local account name; see Install-GSMServerService's
+            # own comment at this call site for why.
             Should -Invoke -ModuleName Service -CommandName Start-Process -Times 1 -ParameterFilter {
-                ($ArgumentList -join '|') -eq (@('set', 'GSM-FakeGame', 'ObjectName', 'GSM-ServiceAccount', 'fakepassword') -join '|')
+                ($ArgumentList -join '|') -eq (@('set', 'GSM-FakeGame', 'ObjectName', '.\GSM-ServiceAccount', 'fakepassword') -join '|')
             }
         }
 
@@ -191,6 +201,22 @@ Describe 'Core/Service.psm1' {
             }
 
             { Install-GSMServerService -FolderName 'FakeGame' -ExecutablePath 'D:\Fake\srcds.exe' -InstallDirectory 'D:\Fake' } | Should -Throw
+        }
+
+        It 'provisions the service account via New-GSMServiceAccount and Set-GSMServiceAccountRights when it is not already fully set up' {
+            Mock -ModuleName Service -CommandName Test-GSMServiceAccount -MockWith { $false }
+
+            Install-GSMServerService -FolderName 'FakeGame' -ExecutablePath 'D:\Fake\srcds.exe' -InstallDirectory 'D:\Fake' -AccountName 'GSM-ServiceAccount' | Out-Null
+
+            Should -Invoke -ModuleName Service -CommandName New-GSMServiceAccount -Times 1 -ParameterFilter { $AccountName -eq 'GSM-ServiceAccount' }
+            Should -Invoke -ModuleName Service -CommandName Set-GSMServiceAccountRights -Times 1 -ParameterFilter { $AccountName -eq 'GSM-ServiceAccount' }
+        }
+
+        It 'does not re-provision the service account when it is already fully set up' {
+            Install-GSMServerService -FolderName 'FakeGame' -ExecutablePath 'D:\Fake\srcds.exe' -InstallDirectory 'D:\Fake' | Out-Null
+
+            Should -Invoke -ModuleName Service -CommandName New-GSMServiceAccount -Times 0
+            Should -Invoke -ModuleName Service -CommandName Set-GSMServiceAccountRights -Times 0
         }
     }
 
